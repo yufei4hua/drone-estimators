@@ -17,106 +17,54 @@ for more information.
 
 from __future__ import absolute_import, annotations, division, print_function
 
+import time
 from typing import TYPE_CHECKING, Callable
 
 import numpy as np
-from flax.struct import dataclass
-from lsy_models.dataclasses import QuadrotorState
 from scipy.linalg import block_diag
+
+from lsy_estimators.datacls import SigmaPointsSettings, UKFData, UKFSettings
+from lsy_estimators.integration import integrate_UKFData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-@dataclass
-class UKFData:
-    """TODO."""
-
-    state: QuadrotorState
-    covariance: NDArray[np.floating]  # Covariance matrix
-
-    sigmas_f: NDArray[np.floating]
-    sigmas_h: NDArray[np.floating]
-
-    u: NDArray[np.floating]  # input
-    z: NDArray[np.floating]  # measurement
-    dt: np.floating
-
-    K: NDArray[np.floating]  # Kalman gain
-    y: NDArray[np.floating]  # residual
-
-    S: NDArray[np.floating]  # system uncertainty
-    # SI: NDArray[np.floating]  # inverse system uncertainty
-
-    @classmethod
-    def create(
-        cls,
-        dim_u: int = 4,
-        dim_z: int = 7,
-        forces_dist: bool | None = False,
-        torques_dist: bool | None = False,
-    ) -> UKFData:
-        """TODO."""
-        state = QuadrotorState.create_empty(forces_dist, torques_dist)
-        dim_x = QuadrotorState.get_state_dim(state)
-
-        covariance = np.eye(dim_x)
-
-        sigmas_f = np.zeros(dim_x)
-        sigmas_h = np.zeros(dim_z)
-
-        u = np.zeros(dim_u)  # input
-        z = np.zeros(dim_z)  # measurement
-        dt = 1
-
-        K = np.zeros((dim_x, dim_z))  # Kalman gain
-        y = np.zeros((dim_z))  # residual
-        S = np.zeros((dim_z, dim_z))  # system uncertainty
-        # SI = np.zeros((dim_z, dim_z))  # inverse system uncertainty
-
-        return cls(state, covariance, sigmas_f, sigmas_h, u, z, dt, K, y, S)  # , SI)
-
-
-@dataclass
-class UKFSettings:
-    """TODO."""
-
-    SPsettings: SigmaPointsSettings
-    Q: NDArray[np.floating]
-    R: NDArray[np.floating]
-    fx: Callable
-    hx: Callable
-
-    @classmethod
-    def create(
-        cls,
-        SPsettings: SigmaPointsSettings,
-        Q: NDArray[np.floating],
-        R: NDArray[np.floating],
-        fx: Callable[[QuadrotorState, NDArray], QuadrotorState],
-        hx: Callable[[QuadrotorState, NDArray], QuadrotorState],
-    ) -> UKFSettings:
-        """TODO."""
-        return cls(SPsettings, Q, R, fx, hx)
-
-
 def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     """TODO."""
-    xp = data.covariance.__array_namespace__()
+    xp = data.pos.__array_namespace__()
     #### Predict
     # Calculate sigma pointstf.transform.rotation.x,
+    # TODO special sigma points for quaternions!
     sigmas = ukf_calculate_sigma_points(data, settings)
-    sigma_states = QuadrotorState.from_array(data.state, sigmas)
+    data_sigmas = UKFData.from_array(data, sigmas)
 
     # Pass sigma points through dynamics
-    sigma_states_dot = settings.fx(sigma_states, data.u)
-    sigmas_dot = QuadrotorState.as_array(sigma_states_dot)
+    pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot = settings.fx(
+        pos=data_sigmas.pos,
+        quat=data_sigmas.quat,
+        vel=data_sigmas.vel,
+        angvel=data_sigmas.angvel,
+        forces_motor=data_sigmas.forces_motor,
+        forces_dist=data_sigmas.forces_dist,
+        torques_dist=data_sigmas.torques_dist,
+        command=data.u,
+    )
+    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot)
+    # sigmas_dot = QuadrotorState.as_array(sigma_states_dot)
+
+    # print(f"function call = {(t2 - t1) * 1000}ms, as_array = {(t3 - t2) * 1000}ms")
 
     # Integrate dynamics if continuous
     # TODO implement proper integrator
-    # TODO watch out for quaternion integration!
-    sigmas_f = sigmas + sigmas_dot * data.dt
+    # TODO watch out for quaternion integration! (length and orientation)
+    # sigmas_f = sigmas + sigmas_dot * data.dt
+    # sigmas_f[..., 3:7] = (
+    #     sigmas_f[..., 3:7] / xp.linalg.norm(sigmas_f[..., 3:7], axis=-1)[:, None]
+    # )  # TODO jax cant do that in place
     # data = data.replace(sigmas_f=sigmas_f)
+    data_sigmas_f = integrate_UKFData(data_sigmas, data_sigmas_dot)
+    sigmas_f = UKFData.as_array(data_sigmas_f)
 
     # Compute prior with unscented transform
     x, P = ukf_unscented_transform(
@@ -129,7 +77,7 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     #### Correct
     # Pass prior sigmas through measurment function h(x,u,dt) to get measurement sigmas
     # sigmas_h = settings.hx(sigmas_f, data.u, data.dt)
-    sigmas_h = sigmas_f[..., :7]  # TODO remove this Ghetto version
+    sigmas_h = sigmas_f[..., :7]  # TODO replace this Ghetto version with hx
     # data = data.replace(sigmas_h=sigmas_h)
 
     # Pass mean and covariance of prediction through unscented transform
@@ -153,8 +101,8 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     P = P - xp.dot(K, xp.dot(S, K.T))
 
     # Save posterior
-    state = QuadrotorState.from_array(data.state, x)
-    data = data.replace(state=state, covariance=P)
+    data = UKFData.from_array(data, x)
+    data = data.replace(covariance=P)
 
     return data
 
@@ -222,14 +170,15 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
 
 def ukf_calculate_sigma_points(data: UKFData, settings: UKFSettings) -> NDArray[np.floating]:
     """TODO."""
-    xp = data.covariance.__array_namespace__()
+    xp = data.pos.__array_namespace__()
     U = xp.linalg.cholesky(
         (settings.SPsettings.lambda_ + settings.SPsettings.n) * data.covariance, upper=True
     )
 
-    state_array = QuadrotorState.as_array(data.state)
+    state_array = UKFData.as_array(data)
     sigma_center = state_array
     # TODO for the quaternions use more sophisitcated approach to keep length 1!
+    # Mainly: rotate in tangent space
     sigma_pos = xp.subtract(state_array, -U)
     sigma_neg = xp.subtract(state_array, U)
     return xp.vstack((sigma_center, sigma_pos, sigma_neg))
@@ -245,13 +194,13 @@ def ukf_unscented_transform(
     xp = sigmas.__array_namespace__()
     x = xp.dot(Wm, sigmas)
 
-    # new covariance is the sum of the outer product of the residuals
-    # times the weights
-    y = sigmas - x[xp.newaxis, :]  # TODO replace with None?
+    # new covariance is the sum of the outer product
+    # of the residuals times the weights
+    y = sigmas - x[None, :]
     P = xp.dot(y.T, xp.dot(xp.diag(Wc), y))
 
     if noise_cov is not None:
-        P += noise_cov
+        P = P + noise_cov
 
     return (x, P)
 
@@ -272,33 +221,6 @@ def ukf_cross_variance(
     )
     Pxz = xp.sum(Pxz, axis=0)
     return Pxz
-
-
-@dataclass
-class SigmaPointsSettings:
-    """TODO."""
-
-    n: int
-    alpha: float
-    beta: float
-    kappa: float
-    lambda_: float
-    Wc: NDArray[np.floating]
-    Wm: NDArray[np.floating]
-
-    @classmethod
-    def create(cls, n: int, alpha: float, beta: float, kappa: float = 0.0) -> SigmaPointsSettings:
-        """TODO."""
-        lambda_ = alpha**2 * (n + kappa) - n
-        c = 0.5 / (n + lambda_)
-        Wc0 = np.array([lambda_ / (n + lambda_) + (1 - alpha**2 + beta)])
-        Wm0 = np.array([lambda_ / (n + lambda_)])
-        Wc = np.full(2 * n, c)
-        Wm = np.full(2 * n, c)
-        Wc = np.concat((Wc0, Wc))
-        Wm = np.concat((Wm0, Wm))
-
-        return cls(n, alpha, beta, kappa, lambda_, Wc, Wm)
 
 
 def order_by_derivative(Q: NDArray[np.floating], dim: int, block_size: int) -> NDArray[np.floating]:

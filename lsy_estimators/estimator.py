@@ -7,8 +7,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Callable
 
 import numpy as np
-from flax.struct import dataclass, field
-from lsy_models.dataclasses import QuadrotorState
 from lsy_models.models import dynamics_numeric, observation_function
 
 from lsy_estimators.filterpy import (
@@ -58,11 +56,8 @@ class Estimator(ABC):
         Args:
             u: Input to the dynamical system.
         """
-        # if np.ndim(u) < 2:  # Make u batchable, if 1D
-        #     u_ = np.array([u])
-        # assert np.shape(u)[0] == self._input_dim
-        # self._input = u
-        self.data.u = u
+        # TODO check for shape?
+        self.data = self.data.replace(u=u)
 
 
 class KalmanFilter(Estimator):
@@ -74,6 +69,7 @@ class KalmanFilter(Estimator):
         model: str = "first_principles",
         config: str = "cf2x-",
         filter_type: str = "UKF",
+        estimate_forces_motor: bool = False,
         estimate_forces_dist: bool = False,
         estimate_torques_dist: bool = False,
         initial_obs: dict[str, NDArray[np.floating]] | None = None,
@@ -90,27 +86,36 @@ class KalmanFilter(Estimator):
         fx = dynamics_numeric(model, config)
         fx_is_continuous = True  # TODO
 
-        # dim_x = 12  # TODO from available models
+        dim_x = 13
+        if estimate_forces_motor:
+            dim_x += 4
+        if estimate_forces_dist:
+            dim_x += 3
+        if estimate_torques_dist:
+            dim_x += 3
         dim_u = 4  # TODO from available models
         dim_z = 7  # pos, quat
         dt = 1.0 / 200  # default Vicon rate
 
-        self.data = UKFData.create(
-            dim_u=dim_u,
-            dim_z=dim_z,
+        self.data = UKFData.create_empty(
+            forces_motor=estimate_forces_motor,
             forces_dist=estimate_forces_dist,
             torques_dist=estimate_torques_dist,
+            dim_u=dim_u,
+            dim_z=dim_z,
         )
-        dim_x = QuadrotorState.get_state_dim(self.data.state)
+
+        dim_x = UKFData.get_state_dim(self.data)
+        # print(f"dim_x={dim_x}")
 
         Q, R = self.create_covariance_matrices(
             dim_x=dim_x,
             dim_z=dim_z,
-            varQ_pos=1e-1,
-            varQ_quat=1e-0,
-            varQ_forces_motor=1e-2,
+            varQ_pos=1e-3,
+            varQ_quat=1e-1,
+            varQ_forces_motor=1e0,
             varR_pos=1e-8,
-            varR_quat=3e-3,
+            varR_quat=3e-6,
             dt=dt,
         )
 
@@ -121,10 +126,7 @@ class KalmanFilter(Estimator):
 
         # Initialize state and covariance
         if initial_obs is not None:
-            x = np.zeros((dim_x))
-            x[:dim_z] = np.concatenate((initial_obs["pos"], initial_obs["quat"]))
-            initial_state = QuadrotorState.from_array(self.data.state, x)
-            self.data = self.data.replace(state=initial_state)
+            self.data = self.data.replace(pos=initial_obs["pos"], quat=initial_obs["quat"])
             # How certain are we initially? Basically 100% if we have data
             self.data = self.data.replace(covariance=np.eye(dim_x) * 1e-6)
 
@@ -175,13 +177,13 @@ class KalmanFilter(Estimator):
         Q[10:13, 3:7] = Q_rot[3, 0]  # quat <-> angvel
 
         # Motor forces TODO: maybe add correlation of acceleration (and angular acc) to motor forces
-        Q[13:17] *= varQ_forces_motor
+        Q[13:17] *= varQ_forces_motor  # TODO move index as in dataclass example and make optional
 
         # External forces and torques TODO Maybe make x and v dependend on F uncertainty and same for torque
-        if self.data.state.forces_dist is not None:
+        if self.data.forces_dist is not None:  # TODO move index as in dataclass example
             Q[17:20, 17:20] *= varQ_forces_dist  # Force
-        if self.data.state.torques_dist is not None:
-            if self.data.state.forces_dist is None:
+        if self.data.torques_dist is not None:
+            if self.data.forces_dist is None:
                 Q[17:20, 17:20] *= varQ_torques_dist  # Torque
             else:
                 Q[20:23, 20:23] *= varQ_torques_dist  # Torque
@@ -203,7 +205,7 @@ class KalmanFilter(Estimator):
         obs: NDArray[np.floating],
         dt: np.floating | None = None,
         u: NDArray[np.floating] | None = None,
-    ) -> NDArray[np.floating]:
+    ) -> UKFData:
         """Steps the UKF by one. Doing one prediction and correction step.
 
         Args:
@@ -216,18 +218,17 @@ class KalmanFilter(Estimator):
         """
         # Update the input
         if u is not None:
-            # self.set_input(u)
-            self.data = self.data.replace(u=u)
+            self.set_input(u)
 
         # Update observation and dt
         # dt hast to be vectorized to work properly in jax
         if dt is not None and dt > 0:
             self.data = self.data.replace(z=obs, dt=np.array([dt]))
 
-        if self.data.dt > 0:  # TODO make dt check more elegant and catch all errors
+            # if self.data.dt > 0:  # TODO make dt check more elegant and catch all errors
             self.data = ukf_predict_correct(self.data, self.settings)
 
-        return self.data.state
+        return self.data
 
 
 # test = KalmanFilter(1.0 / 200)

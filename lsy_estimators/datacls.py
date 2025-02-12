@@ -1,0 +1,216 @@
+"""TODO."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+from flax.struct import Callable, dataclass
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+
+@dataclass
+class UKFData:
+    """TODO."""
+
+    pos: NDArray[np.floating]
+    quat: NDArray[np.floating]
+    vel: NDArray[np.floating]
+    angvel: NDArray[np.floating]
+    forces_motor: NDArray[np.floating] | None
+    forces_dist: NDArray[np.floating] | None
+    torques_dist: NDArray[np.floating] | None
+    covariance: NDArray[np.floating]  # Covariance matrix
+
+    u: NDArray[np.floating]  # input
+    z: NDArray[np.floating]  # measurement
+    dt: np.floating
+
+    @classmethod
+    def create_empty(
+        cls,
+        forces_motor: bool = False,
+        forces_dist: bool = False,
+        torques_dist: bool = False,
+        dim_u: int = 4,
+        dim_z: int = 7,
+    ) -> UKFData:
+        """TODO."""
+        pos = np.zeros(3)
+        quat = np.array([0, 0, 0, 1])
+        vel = np.zeros(3)
+        angvel = np.zeros(3)
+        dim_x = 13
+        if forces_motor:
+            forces_motor = np.zeros(4)
+            dim_x = dim_x + 4
+        else:
+            forces_motor = None
+        if forces_dist:
+            forces_dist = np.zeros(3)
+            dim_x = dim_x + 3
+        else:
+            forces_dist = None
+        if torques_dist:
+            torques_dist = np.zeros(3)
+            dim_x = dim_x + 3
+        else:
+            torques_dist = None
+
+        covariance = np.eye(dim_x)
+
+        u = np.zeros(dim_u)  # input
+        z = np.zeros(dim_z)  # measurement
+        dt = 1
+
+        return cls(
+            pos, quat, vel, angvel, forces_motor, forces_dist, torques_dist, covariance, u, z, dt
+        )
+
+    @classmethod
+    def create(
+        cls,
+        pos: NDArray,
+        quat: NDArray,
+        vel: NDArray,
+        angvel: NDArray,
+        forces_motor: NDArray | None = None,
+        forces_dist: NDArray | None = None,
+        torques_dist: NDArray | None = None,
+    ) -> UKFData:  # TODO enable to enter everything!
+        """TODO."""
+        pos = np.zeros(3)
+        quat = np.array([0, 0, 0, 1])
+        vel = np.zeros(3)
+        angvel = np.zeros(3)
+        dim_x = 13
+        if forces_motor is None:
+            forces_motor = np.zeros(4)
+            dim_x = dim_x + 4
+        if forces_dist is None:
+            forces_dist = np.zeros(3)
+            dim_x = dim_x + 3
+        if torques_dist is None:
+            torques_dist = np.zeros(3)
+            dim_x = dim_x + 3
+
+        covariance = np.eye(dim_x)
+
+        u = np.zeros(4)  # input
+        z = np.zeros(7)  # measurement
+        dt = 1
+
+        return cls(
+            pos, quat, vel, angvel, forces_motor, forces_dist, torques_dist, covariance, u, z, dt
+        )
+
+    @classmethod
+    def as_array(cls, data: UKFData) -> NDArray:
+        """Returns the state as an array."""
+        xp = data.pos.__array_namespace__()
+        x = xp.concat((data.pos, data.quat, data.vel, data.angvel), axis=-1)
+        if data.forces_motor is not None:
+            x = xp.concat((x, data.forces_motor), axis=-1)
+        if data.forces_dist is not None:
+            x = xp.concat((x, data.forces_dist), axis=-1)
+        if data.torques_dist is not None:
+            x = xp.concat((x, data.torques_dist), axis=-1)
+        return x
+
+    @classmethod
+    def from_array(cls, data: UKFData, array: NDArray) -> UKFData:
+        """Updates data in the given structure based on a given array."""
+        pos = array[..., 0:3]
+        quat = array[..., 3:7]
+        vel = array[..., 7:10]
+        angvel = array[..., 10:13]
+        idx = 13
+        if data.forces_motor is not None:
+            forces_motor = array[..., idx : idx + 4]
+            idx = idx + 4
+        else:
+            forces_motor = None
+        if data.forces_dist is not None:
+            forces_dist = array[..., idx : idx + 3]
+            idx = idx + 3
+        else:
+            forces_dist = None
+        if data.torques_dist is not None:
+            torques_dist = array[..., idx : idx + 3]
+            idx = idx + 3
+        else:
+            torques_dist = None
+
+        return data.replace(
+            pos=pos,
+            quat=quat,
+            vel=vel,
+            angvel=angvel,
+            forces_motor=forces_motor,
+            forces_dist=forces_dist,
+            torques_dist=torques_dist,
+        )
+
+    @classmethod
+    def get_state_dim(cls, data: UKFData) -> int:
+        """Returns the dimension of the state."""
+        dim_x = 13
+        if data.forces_motor is not None:
+            dim_x = dim_x + 4
+        if data.forces_dist is not None:
+            dim_x = dim_x + 3
+        if data.torques_dist is not None:
+            dim_x = dim_x + 3
+        return dim_x
+
+
+@dataclass
+class UKFSettings:
+    """TODO."""
+
+    SPsettings: SigmaPointsSettings
+    Q: NDArray[np.floating]
+    R: NDArray[np.floating]
+    fx: Callable
+    hx: Callable
+
+    @classmethod
+    def create(
+        cls,
+        SPsettings: SigmaPointsSettings,
+        Q: NDArray[np.floating],
+        R: NDArray[np.floating],
+        fx: Callable[[NDArray], NDArray],  # TODO full signature
+        hx: Callable[[NDArray], NDArray],  # TODO full signature
+    ) -> UKFSettings:
+        """TODO."""
+        return cls(SPsettings, Q, R, fx, hx)
+
+
+@dataclass
+class SigmaPointsSettings:
+    """TODO."""
+
+    n: int
+    alpha: float
+    beta: float
+    kappa: float
+    lambda_: float
+    Wc: NDArray[np.floating]
+    Wm: NDArray[np.floating]
+
+    @classmethod
+    def create(cls, n: int, alpha: float, beta: float, kappa: float = 0.0) -> SigmaPointsSettings:
+        """TODO."""
+        lambda_ = alpha**2 * (n + kappa) - n
+        c = 0.5 / (n + lambda_)
+        Wc0 = np.array([lambda_ / (n + lambda_) + (1 - alpha**2 + beta)])
+        Wm0 = np.array([lambda_ / (n + lambda_)])
+        Wc = np.full(2 * n, c)
+        Wm = np.full(2 * n, c)
+        Wc = np.concat((Wc0, Wc))
+        Wm = np.concat((Wm0, Wm))
+
+        return cls(n, alpha, beta, kappa, lambda_, Wc, Wm)
