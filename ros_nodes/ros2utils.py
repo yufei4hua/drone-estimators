@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
-from geometry_msgs.msg import TransformStamped, TwistStamped, Vector3, WrenchStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped, TwistStamped, Vector3, WrenchStamped
+from std_msgs.msg import Float64MultiArray
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -37,28 +38,29 @@ def tf2array(tf: TransformStamped) -> tuple[Header, NDArray[np.floating], NDArra
     return tf.header, pos, quat
 
 
-def create_transform(
-    header: Header, pos: NDArray[np.floating], quat: NDArray[np.floating]
+def create_pose(
+    header: Header, drone: str, pos: NDArray[np.floating], quat: NDArray[np.floating]
 ) -> TransformStamped:
-    transform = TransformStamped()
-    transform.header = header
-    # TODO child frame id? should stay the same??
-    transform.transform.translation.x = pos[0]
-    transform.transform.translation.y = pos[1]
-    transform.transform.translation.z = pos[2]
-    transform.transform.rotation.x = quat[0]
-    transform.transform.rotation.y = quat[1]
-    transform.transform.rotation.z = quat[2]
-    transform.transform.rotation.w = quat[3]
+    pose = PoseStamped()
+    pose.header = header
+    pose.header.frame_id = "world"
+    pose.pose.position.x = pos[0]
+    pose.pose.position.y = pos[1]
+    pose.pose.position.z = pos[2]
+    pose.pose.orientation.x = quat[0]
+    pose.pose.orientation.y = quat[1]
+    pose.pose.orientation.z = quat[2]
+    pose.pose.orientation.w = quat[3]
 
-    return transform
+    return pose
 
 
 def create_twist(
-    header: Header, vel: NDArray[np.floating], angvel: NDArray[np.floating]
-) -> TransformStamped:
+    header: Header, drone: str, vel: NDArray[np.floating], angvel: NDArray[np.floating]
+) -> TwistStamped:
     twist = TwistStamped()
     twist.header = header
+    twist.header.frame_id = drone
     twist.twist.linear.x = vel[0]
     twist.twist.linear.y = vel[1]
     twist.twist.linear.z = vel[2]
@@ -69,18 +71,37 @@ def create_twist(
     return twist
 
 
+def create_array(header: Header, drone: str, data: NDArray | None) -> Float64MultiArray:
+    if data is not None:
+        array = Float64MultiArray()
+        array.data = list(data)
+        return array
+    else:
+        array = Float64MultiArray()
+        array.data = [0.0, 0.0, 0.0, 0.0]
+        return array
+
+
 def create_wrench(
-    header: Header, force: NDArray[np.floating], torque: NDArray[np.floating]
+    header: Header,
+    drone: str,
+    force: NDArray[np.floating] | None,
+    torque: NDArray[np.floating] | None,
 ) -> TransformStamped:
     wrench = WrenchStamped()
     wrench.header = header
+    wrench.header.frame_id = drone
     if force is not None:
         wrench.wrench.force.x = force[0]
         wrench.wrench.force.y = force[1]
         wrench.wrench.force.z = force[2]
+    else:
+        wrench.wrench.force.x = 0.0
+        wrench.wrench.force.y = 0.0
+        wrench.wrench.force.z = 0.0
     if torque is not None:
-        wrench.wrench.torque.x = force[0]
-        wrench.wrench.torque.y = force[1]
-        wrench.wrench.torque.z = force[2]
+        wrench.wrench.torque.x = 0.0
+        wrench.wrench.torque.y = 0.0
+        wrench.wrench.torque.z = 0.0
 
     return wrench
