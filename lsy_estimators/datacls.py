@@ -81,19 +81,12 @@ class UKFData:
         torques_dist: NDArray | None = None,
     ) -> UKFData:  # TODO enable to enter everything!
         """TODO."""
-        pos = np.zeros(3)
-        quat = np.array([0, 0, 0, 1])
-        vel = np.zeros(3)
-        angvel = np.zeros(3)
         dim_x = 13
         if forces_motor is None:
-            forces_motor = np.zeros(4)
             dim_x = dim_x + 4
         if forces_dist is None:
-            forces_dist = np.zeros(3)
             dim_x = dim_x + 3
         if torques_dist is None:
-            torques_dist = np.zeros(3)
             dim_x = dim_x + 3
 
         covariance = np.eye(dim_x)
