@@ -124,7 +124,8 @@ class StateEstimator(object):
         """Return the body angular velocity."""
         return global_to_body(self.quat, self.omega_g)
 
-    def step(self, pos, quat, dt):
+    def step(self, pos, quat, dt, command=None):
+        """This function is not part of the legacy estimator and only for compatability."""
         self.dt = dt
         # the transforms3d library used here uses scalar first, so we need to make it scalar first
         quat = np.roll(quat, 1)
@@ -135,6 +136,10 @@ class StateEstimator(object):
         return UKFData.create(
             self.pos, np.array(np.roll(self.quat, -1)).astype(float), self.vel, self.omega_b
         )
+
+    def set_input(self, command):
+        """This function is not part of the legacy estimator and only for compatability."""
+        pass
 
     def get_new_measurement(self, position, quaternion):
         """Get a new measurement of position and orientation.
