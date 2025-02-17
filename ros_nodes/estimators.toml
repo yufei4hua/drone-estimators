@@ -1,0 +1,20 @@
+# Simly add your estimators as shown below
+
+# Supported types: legacy, UKF
+# Supported models: See lsy_models.models.available_models
+
+[estimator1]
+type = "legacy"
+drone_name = "cf90"
+model = "fitted_DI_rpy"
+estimate_forces_motor = false
+estimate_forces_dist = false
+estimate_torques_dist = false
+
+[estimator2]
+type = "legacy"
+drone_name = "cf97"
+model = "fitted_DI_rpy"
+estimate_forces_motor = false
+estimate_forces_dist = false
+estimate_torques_dist = false

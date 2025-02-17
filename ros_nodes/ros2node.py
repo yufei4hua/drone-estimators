@@ -8,18 +8,17 @@ import sys
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import lsy_models.utils.rotation as R
 import numpy as np
 import rclpy
-from geometry_msgs.msg import (
-    PoseStamped,
-    TransformStamped,
-    TwistStamped,
-    Vector3,
-    WrenchStamped,
-)  # Message types: https://docs.ros2.org/foxy/api/geometry_msgs/index-msg.html
+import toml
+
+# Message types: https://docs.ros2.org/foxy/api/geometry_msgs/index-msg.html
+from geometry_msgs.msg import PoseStamped, TwistStamped, WrenchStamped
+from munch import Munch, munchify
 from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 from tf2_msgs.msg import TFMessage
@@ -29,7 +28,6 @@ from lsy_estimators.estimator_legacy import StateEstimator
 from ros_nodes.ros2utils import (
     create_array,
     create_pose,
-    # create_transform,
     create_twist,
     create_wrench,
     find_transform,
@@ -56,25 +54,35 @@ class EstimatorNode(Node):
     to keep it simple, we use standard message types.
     """
 
-    def __init__(self, drone: str):
-        super().__init__(f"Estimator_{drone}")
+    def __init__(self, settings: Munch):
+        """TODO."""
+        super().__init__(f"Estimator_{settings.drone_name}")
         self.lock = threading.Lock()
-        self.drone = drone
+        self.settings = settings
         sec, _ = self.get_clock().now().seconds_nanoseconds()
         self.time_stamp_last_measurement = sec
         self.time_stamp_last_command = sec
         self.perf_timings = deque(maxlen=5000)
 
-        # TODO add additional information from Node call
-        # self.estimator = KalmanFilter(
-        #     dt=1.0 / 200,
-        #     model="fitted_DI_rpy",  # mellinger_rpyt, fitted_DI_rpy
-        #     estimate_forces_motor=False,
-        #     estimate_forces_dist=True,
-        #     estimate_torques_dist=False,
-        # )
-
-        self.estimator = StateEstimator((0.0001, 0.007, 0.09, 0.005, 0.07))
+        match settings.type:
+            case "legacy":
+                self.estimator = StateEstimator((0.0001, 0.007, 0.09, 0.005, 0.07))
+                if (
+                    settings.estimate_forces_motor
+                    or settings.estimate_forces_dist
+                    or settings.estimate_torques_dist
+                ):
+                    print(
+                        "[ESTIMATOR] Legacy estimator does not support force or torque estimation!"
+                    )
+            case "ukf":
+                self.estimator = KalmanFilter(
+                    dt=1.0 / 200,
+                    model=settings.model,  # mellinger_rpyt, fitted_DI_rpy
+                    estimate_forces_motor=settings.estimate_forces_motor,
+                    estimate_forces_dist=settings.estimate_forces_dist,
+                    estimate_torques_dist=settings.estimate_torques_dist,
+                )
 
         # A better implementation would be:
         # https://docs.ros.org/en/foxy/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
@@ -82,20 +90,20 @@ class EstimatorNode(Node):
         self.subscriber_frames = self.create_subscription(TFMessage, "/tf", self.estimate_state, 2)
 
         self.subscriber_control = self.create_subscription(
-            Float64MultiArray, f"/command_{drone}", self.update_control, 2
+            Float64MultiArray, f"/command_{self.settings.drone_name}", self.update_control, 2
         )
 
         self.publisher_pose = self.create_publisher(
-            PoseStamped, f"/estimated_state_pose_{drone}", 2
+            PoseStamped, f"/estimated_state_pose_{self.settings.drone_name}", 2
         )  # pos, quat
         self.publisher_twist = self.create_publisher(
-            TwistStamped, f"/estimated_state_twist_{drone}", 2
+            TwistStamped, f"/estimated_state_twist_{self.settings.drone_name}", 2
         )  # vel, angvel
         self.publisher_forces = self.create_publisher(
-            Float64MultiArray, f"/estimated_state_forces_{drone}", 2
+            Float64MultiArray, f"/estimated_state_forces_{self.settings.drone_name}", 2
         )  # f_motors
         self.publisher_wrench = self.create_publisher(
-            WrenchStamped, f"/estimated_state_wrench_{drone}", 2
+            WrenchStamped, f"/estimated_state_wrench_{self.settings.drone_name}", 2
         )  # f_dis, t_dis
 
     def estimate_state(self, msg: TFMessage):
@@ -109,10 +117,10 @@ class EstimatorNode(Node):
             return
 
         try:
-            tf = find_transform(msg.transforms, self.drone)
+            tf = find_transform(msg.transforms, self.settings.drone_name)
             if tf is None:
                 self.get_logger().warning(
-                    f"Drone {self.drone} could not have been found. Occluded?",
+                    f"Drone {self.settings.drone_name} could not have been found. Occluded?",
                     throttle_duration_sec=0.5,
                 )
             else:
@@ -121,7 +129,7 @@ class EstimatorNode(Node):
                 dt = time_stamp - self.time_stamp_last_measurement
 
                 # self.get_logger().info(
-                #     f"New Measurement for {self.drone}: time={time_stamp}, pos_meas={pos_meas}, quat_meas={quat_meas}"
+                #     f"New Measurement for {self.settings.drone_name}: time={time_stamp}, pos_meas={pos_meas}, quat_meas={quat_meas}"
                 # )
 
                 # rot = R.from_quat(quat_meas)
@@ -152,14 +160,15 @@ class EstimatorNode(Node):
 
                 # print(f"time_stamp={time_stamp}, time_step_command={self.time_stamp_last_command}")
                 # Before finishing, we should also check how recent the control inputs were
-                if time_stamp - self.time_stamp_last_command > 1:
+                dt_cmd = time_stamp - self.time_stamp_last_command
+                if dt_cmd > 1:
                     # TODO Move this into Kalman Filter
                     # TODO Change varQ_forces_motor based on how old the estimate is
-                    self.get_logger().warning(
-                        f"Haven't received a new command in {time_stamp - self.time_stamp_last_command:.0f}s. Setting it to zero.",
-                        throttle_duration_sec=1.0,
-                    )
-                    return Float64MultiArray(data=[0.0, 0.0, 0.0, 0.0])
+                    if self.settings.type != "legacy":
+                        self.get_logger().warning(
+                            f"Haven't received a new command in {dt_cmd:.0f}s. Setting it to zero.",
+                            throttle_duration_sec=1.0,
+                        )
         finally:
             self.lock.release()  # Ensure lock is released
 
@@ -188,25 +197,28 @@ class EstimatorNode(Node):
         """TODO."""
         # TODO time this
 
-        # self.get_logger().info(f"Published for {self.drone}: {state}", throttle_duration_sec=0.5)
+        # self.get_logger().info(f"Published for {self.settings.drone_name}: {state}", throttle_duration_sec=0.5)
         # self.get_logger().info(
-        #     f"Published for {self.drone}: {state.pos}, {state.quat}, {state.vel}, {state.angvel}"
+        #     f"Published for {self.settings.drone_name}: {state.pos}, {state.quat}, {state.vel}, {state.angvel}"
         # )
 
-        transform = create_pose(header, self.drone, state.pos, state.quat)
+        transform = create_pose(header, self.settings.drone_name, state.pos, state.quat)
         self.publisher_pose.publish(transform)
 
-        twist = create_twist(header, self.drone, state.vel, state.angvel)
+        twist = create_twist(header, self.settings.drone_name, state.vel, state.angvel)
         self.publisher_twist.publish(twist)
 
-        forces = create_array(header, self.drone, state.forces_motor)
+        forces = create_array(header, self.settings.drone_name, state.forces_motor)
         # This type doesn't have a stamp!
         self.publisher_forces.publish(forces)
 
-        wrench = create_wrench(header, self.drone, state.forces_dist, state.torques_dist)
+        wrench = create_wrench(
+            header, self.settings.drone_name, state.forces_dist, state.torques_dist
+        )
         self.publisher_wrench.publish(wrench)
 
-    def shutdown(self, signum, frame):
+    def shutdown(self, _, __):
+        """TODO."""
         self.subscriber_frames.destroy()
         self.subscriber_control.destroy()
         time.sleep(0.1)
@@ -218,16 +230,24 @@ class EstimatorNode(Node):
         self.destroy_node()
 
 
-def launch_estimators_MP(drones: list):
+def launch_estimators(estimators: dict):
     """TODO."""
     rclpy.init()
     processes = []
+    seen_drone_names = []
     try:
-        for drone in drones:
-            stop_event = mp.Event()
-            p = mp.Process(target=launch_node, args=(drone, stop_event))  # , daemon=True
-            processes.append((p, stop_event))
-            p.start()
+        for k, v in estimators.items():
+            settings = v
+            name = settings.drone_name
+            if name in seen_drone_names:
+                print(f"[ESTIMATOR]: Estimator for {name} already existing. Check settings")
+            else:
+                seen_drone_names.append(name)
+                stop_event = mp.Event()
+                # not sure if daemon should be True or False
+                p = mp.Process(target=launch_node, args=(settings, stop_event), daemon=True)
+                processes.append((p, stop_event))
+                p.start()
 
         while True:
             try:
@@ -254,11 +274,11 @@ def launch_estimators_MP(drones: list):
         print("All nodes terminated.")
 
 
-def launch_node(drone: str, stop_event: threading.Event):
+def launch_node(settings: Munch, stop_event: threading.Event):
     """TODO."""
-    node = EstimatorNode(drone)
+    node = EstimatorNode(settings)
 
-    print(f"[ESTIMATOR]: Added estimator for {drone} (process {os.getpid()})")
+    print(f"[ESTIMATOR]: Added estimator for {settings.drone_name} (process {os.getpid()})")
 
     signal.signal(signal.SIGINT, node.shutdown)
 
@@ -276,8 +296,18 @@ def launch_node(drone: str, stop_event: threading.Event):
 
 if __name__ == "__main__":
     np.set_printoptions(linewidth=400, precision=3)  # TODO remove
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--drones", nargs="+", help="List of drones to estimate", required=True)
-    args = parser.parse_args()
 
-    launch_estimators_MP(args.drones)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--settings", default="ros_nodes/estimators.toml", help="Path to Settings file"
+    )
+    args = parser.parse_args()
+    path = args.settings
+
+    path = Path(Path(__file__).parents[1] / path)
+    with open(path, "r") as f:
+        estimators = munchify(toml.load(f))
+
+    launch_estimators(estimators)
+
+    # launch_estimators_MP(args.drones)
