@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import sys
+import multiprocessing as mp
 import threading
+import os
 import time
 from collections import deque
 from typing import TYPE_CHECKING
 
+import lsy_models.utils.rotation as R
 import numpy as np
 import rclpy
 from geometry_msgs.msg import (
@@ -57,14 +60,16 @@ class EstimatorNode(Node):
         self.lock = threading.Lock()
         self.drone = drone
         sec, _ = self.get_clock().now().seconds_nanoseconds()
-        self.time_stamp_last = sec
+        self.time_stamp_last_measurement = sec
+        self.time_stamp_last_command = sec
         self.perf_timings = deque(maxlen=5000)
 
         # TODO add additional information from Node call
         # self.estimator = KalmanFilter(
         #     dt=1.0 / 200,
-        #     estimate_forces_motor=True,
-        #     estimate_forces_dist=False,
+        #     model="fitted_DI_rpy",  # mellinger_rpyt, fitted_DI_rpy
+        #     estimate_forces_motor=False,
+        #     estimate_forces_dist=True,
         #     estimate_torques_dist=False,
         # )
 
@@ -94,6 +99,7 @@ class EstimatorNode(Node):
 
     def estimate_state(self, msg: TFMessage):
         """Estimates the full drone state based on the new measurements."""
+        # TODO: implement warning if the control hasn't been updated in a long time!
         if not self.lock.acquire(blocking=False):
             self.get_logger().warning(
                 "New measurements before finishing estimation. Can't keep up...",
@@ -109,24 +115,28 @@ class EstimatorNode(Node):
                     throttle_duration_sec=0.5,
                 )
             else:
-                header, pos, quat = tf2array(tf)
+                header, pos_meas, quat_meas = tf2array(tf)
                 time_stamp = header2sec(header)
-                dt = time_stamp - self.time_stamp_last
+                dt = time_stamp - self.time_stamp_last_measurement
 
                 # self.get_logger().info(
-                #     f"New Measurement for {self.drone}: time={time_stamp}, pos={pos}, quat={quat}"
+                #     f"New Measurement for {self.drone}: time={time_stamp}, pos_meas={pos_meas}, quat_meas={quat_meas}"
                 # )
 
-                if dt < 0:
+                # rot = R.from_quat(quat_meas)
+                # print(f"rpy_meas={rot.as_euler('xyz', degrees=True)}")
+
+                if dt < 0:  # This should only be executed when playing rosbags
                     self.get_logger().warning(
                         "dt < 0s! Assuming rosbag is played. Setting time to now"
                     )
-                    self.time_stamp_last = time_stamp
-                if dt > 1e-3:  # accepting the new data point
+                    self.time_stamp_last_measurement = time_stamp
+                    self.time_stamp_last_command = time_stamp
+                elif dt > 1e-3:  # accepting the new data point
                     # self.get_logger().info(f"dt={dt}")
-                    self.time_stamp_last = time_stamp
+                    self.time_stamp_last_measurement = time_stamp
                     t1 = time.perf_counter()
-                    estimated_state = self.estimator.step(pos, quat, dt)
+                    estimated_state = self.estimator.step(pos_meas, quat_meas, dt)
                     t2 = time.perf_counter()
                     self.perf_timings.append(t2 - t1)
                     self.get_logger().info(
@@ -136,28 +146,51 @@ class EstimatorNode(Node):
                     self.publish_state(header, estimated_state)
                 else:
                     self.get_logger().info(
-                        f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Waiting..."
+                        f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Skipping data point..."
                     )
+
+                # print(f"time_stamp={time_stamp}, time_step_command={self.time_stamp_last_command}")
+                # Before finishing, we should also check how recent the control inputs were
+                if time_stamp - self.time_stamp_last_command > 1:
+                    # TODO Move this into Kalman Filter
+                    # TODO Change varQ_forces_motor based on how old the estimate is
+                    self.get_logger().warning(
+                        f"Haven't received a new command in {time_stamp - self.time_stamp_last_command:.0f}s. Setting it to zero.",
+                        throttle_duration_sec=1.0,
+                    )
+                    return Float64MultiArray(data=[0.0, 0.0, 0.0, 0.0])
         finally:
             self.lock.release()  # Ensure lock is released
 
-    def update_control(self, control):  # TODO add type, TODO get control for current drone only
+    def update_control(self, control: Float64MultiArray):
         """TODO."""
-        ...
-        # roll = control.cmd_roll
-        # pitch = control.cmd_pitch
-        # yaw = control.cmd_pitch
-        # pwm_thrust = control.cmd_thrust
+        # Storing the time of the current command
+        # Note: Not using now() under the assumption that the measurements are very frequent (200Hz)
+        # This is to allow us to also use rosbags without breaking functionality
+        self.time_stamp_last_command = self.time_stamp_last_measurement
 
-        # thrust = pwm2thrust(pwm_thrust)
+        # The command is as it is sent to the drone, meaning for attitude interface:
+        # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
+        rpyt = np.array(control.data)
 
-        # self.estimator.set_input(np.array([thrust, roll, pitch, yaw]))
+        # WARNING: Remove the following lines later.
+        # This is only necessary because data was published wrongly (PYTR) for the current rosbags
+        rpyt = np.roll(rpyt, 1)
+
+        rpyt[..., :-1] = rpyt[..., :-1] * np.pi / 180  # to rad
+
+        # self.get_logger().info(f"set input to {rpyt}")
+
+        self.estimator.set_input(rpyt)
 
     def publish_state(self, header: Header, state: UKFData):  # TODO state type
         """TODO."""
         # TODO time this
 
         # self.get_logger().info(f"Published for {self.drone}: {state}", throttle_duration_sec=0.5)
+        # self.get_logger().info(
+        #     f"Published for {self.drone}: {state.pos}, {state.quat}, {state.vel}, {state.angvel}"
+        # )
 
         transform = create_pose(header, self.drone, state.pos, state.quat)
         self.publisher_pose.publish(transform)
@@ -173,22 +206,91 @@ class EstimatorNode(Node):
         self.publisher_wrench.publish(wrench)
 
 
-def launch_estimators(drones: list):
+def launch_estimators_MP(drones: list):
     """TODO."""
     rclpy.init()
+    processes = []
+    try:
+        for drone in drones:
+            stop_event = mp.Event()
+            p = mp.Process(target=launch_node, args=(drone, stop_event))  # , daemon=True
+            processes.append((p, stop_event))
+            p.start()
 
-    # create one node for each drone and add it to the executor
-    node = EstimatorNode(drones[0])
-    print(f"[ESTIMATOR]: Added estimator for {drones[0]}")
-    rclpy.spin(node)
+        while True:
+            try:
+                time.sleep(1)
+            except KeyboardInterrupt:
+                print("\nKeyboard interrupt received. Terminating nodes...")
+                break
 
+    finally:
+        for _, stop_event in processes:
+            stop_event.set()
+
+        for process, _ in processes:
+            process.join(timeout=5)
+
+        for process, _ in processes:
+            if process.is_alive():
+                print(f"Force terminating process {process.pid}")
+                process.terminate()
+                process.join()
+
+        # rclpy.shutdown()  # Shutdown rclpy after all processes are stopped
+        print("All nodes terminated.")
+        # rclpy.shutdown()
+
+        # Cleanup: Kill all processes
+        # for p in processes:
+        #     print(f"Terminating process {p.pid}")
+        #     p.terminate()
+        # print("Waiting for join")
+        # for p in processes:
+        #     p.join()
+        # rclpy.shutdown()
+        # print("All nodes terminated.")
+
+    # try:
+    #     while rclpy.ok():
+    #         rate.sleep()
+    # except KeyboardInterrupt:
+    #     pass
+
+    # for p in processes:
+    #     p.join()
+
+    # try:
+    #     while rclpy.ok():
+    #         time.sleep(1)
+    # finally:
+    #     for p in processes:
+    #         print("terminated")
+    #         p.terminate()
+
+    # rclpy.shutdown()
+
+
+def launch_node(drone: str, stop_event: threading.Event):
+    """TODO."""
+    node = EstimatorNode(drone)
+    print(f"[ESTIMATOR]: Added estimator for {drone} (process {os.getpid()})")
+    try:
+        while rclpy.ok() and not stop_event.is_set():
+            rclpy.spin_once(node, timeout_sec=0.1)
+            # rclpy.spin(node)
+    finally:
+        pass
+
+    print(f"destroying node {drone}")
+    node.destroy_node()
     rclpy.shutdown()
 
 
 if __name__ == "__main__":
+    np.set_printoptions(linewidth=400, precision=3)  # TODO remove
     parser = argparse.ArgumentParser()
-    parser.add_argument("-drones", nargs="+", help="List of estimated drones", required=True)
-    # Format: python ros2launch.py -drones "cf01" "cf02" ...
+    parser.add_argument("--drones", nargs="+", help="List of drones to estimate", required=True)
     args = parser.parse_args()
 
-    launch_estimators(args.drones)
+    launch_estimators_MP(args.drones)
