@@ -72,8 +72,8 @@ class EstimatorNode(Node):
                     or settings.estimate_forces_dist
                     or settings.estimate_torques_dist
                 ):
-                    print(
-                        "[ESTIMATOR] Legacy estimator does not support force or torque estimation!"
+                    node.get_logger().warning(
+                        "Legacy estimator does not support force or torque estimation!"
                     )
             case "ukf":
                 self.estimator = KalmanFilter(
@@ -105,6 +105,8 @@ class EstimatorNode(Node):
         self.publisher_wrench = self.create_publisher(
             WrenchStamped, f"/estimated_state_wrench_{self.settings.drone_name}", 2
         )  # f_dis, t_dis
+
+        self.get_logger().info(f"Started estimator (process {os.getpid()})")
 
     def estimate_state(self, msg: TFMessage):
         """Estimates the full drone state based on the new measurements."""
@@ -169,6 +171,8 @@ class EstimatorNode(Node):
                             f"Haven't received a new command in {dt_cmd:.0f}s. Setting it to zero.",
                             throttle_duration_sec=1.0,
                         )
+                        control = Float64MultiArray(data=[0.0, 0.0, 0.0, 0.0])
+                        self.update_control(control)
         finally:
             self.lock.release()  # Ensure lock is released
 
@@ -176,7 +180,7 @@ class EstimatorNode(Node):
         """TODO."""
         # Storing the time of the current command
         # Note: Not using now() under the assumption that the measurements are very frequent (200Hz)
-        # This is to allow us to also use rosbags without breaking functionality
+        # This is to allow us to also play rosbags without breaking functionality
         self.time_stamp_last_command = self.time_stamp_last_measurement
 
         # The command is as it is sent to the drone, meaning for attitude interface:
@@ -277,8 +281,6 @@ def launch_estimators(estimators: dict):
 def launch_node(settings: Munch, stop_event: threading.Event):
     """TODO."""
     node = EstimatorNode(settings)
-
-    print(f"[ESTIMATOR]: Added estimator for {settings.drone_name} (process {os.getpid()})")
 
     signal.signal(signal.SIGINT, node.shutdown)
 
