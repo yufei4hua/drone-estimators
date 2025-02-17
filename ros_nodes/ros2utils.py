@@ -1,14 +1,20 @@
+"""This file contains some util functions for ROS 2 nodes."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
-from geometry_msgs.msg import PoseStamped, TransformStamped, TwistStamped, Vector3, WrenchStamped
+from geometry_msgs.msg import PoseStamped, TransformStamped, TwistStamped, WrenchStamped
 from std_msgs.msg import Float64MultiArray
 
 if TYPE_CHECKING:
+    from jax import Array as JaxArray
     from numpy.typing import NDArray
     from std_msgs.msg import Header
+    from torch import Tensor
+
+    Array = NDArray | JaxArray | Tensor
 
 
 def find_transform(transforms: list[TransformStamped], child_frame_id: str) -> TransformStamped:
@@ -16,11 +22,12 @@ def find_transform(transforms: list[TransformStamped], child_frame_id: str) -> T
     return next((tf for tf in transforms if tf.child_frame_id == child_frame_id), None)
 
 
-def header2sec(header: Header):
+def header2sec(header: Header) -> float:
+    """Extracts the current time in seconds from a message header."""
     return float(header.stamp.sec + header.stamp.nanosec * 1e-9)
 
 
-def tf2array(tf: TransformStamped) -> tuple[Header, NDArray[np.floating], NDArray[np.floating]]:
+def tf2array(tf: TransformStamped) -> tuple[Header, Array, Array]:
     """Converts a Transform into numpy arrays."""
     pos = np.array(
         [tf.transform.translation.x, tf.transform.translation.y, tf.transform.translation.z]
@@ -38,9 +45,8 @@ def tf2array(tf: TransformStamped) -> tuple[Header, NDArray[np.floating], NDArra
     return tf.header, pos, quat
 
 
-def create_pose(
-    header: Header, drone: str, pos: NDArray[np.floating], quat: NDArray[np.floating]
-) -> TransformStamped:
+def create_pose(header: Header, drone: str, pos: Array, quat: Array) -> PoseStamped:
+    """Creates a PoseStamped from position and orientation."""
     pose = PoseStamped()
     pose.header = header
     pose.header.frame_id = "world"
@@ -55,9 +61,8 @@ def create_pose(
     return pose
 
 
-def create_twist(
-    header: Header, drone: str, vel: NDArray[np.floating], angvel: NDArray[np.floating]
-) -> TwistStamped:
+def create_twist(header: Header, drone: str, vel: Array, angvel: Array) -> TwistStamped:
+    """Creates a TwistStamped based on velocity and angular velocity."""
     twist = TwistStamped()
     twist.header = header
     twist.header.frame_id = drone
@@ -71,7 +76,11 @@ def create_twist(
     return twist
 
 
-def create_array(header: Header, drone: str, data: NDArray | None) -> Float64MultiArray:
+def create_array(header: Header, drone: str, data: Array | None) -> Float64MultiArray:
+    """Creates a generic Float64Array with the length of data.
+
+    If data is None, an array zeros of length 4 is created.
+    """
     if data is not None:
         array = Float64MultiArray()
         array.data = list(data)
@@ -83,11 +92,12 @@ def create_array(header: Header, drone: str, data: NDArray | None) -> Float64Mul
 
 
 def create_wrench(
-    header: Header,
-    drone: str,
-    force: NDArray[np.floating] | None,
-    torque: NDArray[np.floating] | None,
-) -> TransformStamped:
+    header: Header, drone: str, force: Array | None, torque: Array | None
+) -> WrenchStamped:
+    """Creates a WrenchStamped based on force and torque.
+
+    If force or torque is None, it gets set to zeros.
+    """
     wrench = WrenchStamped()
     wrench.header = header
     wrench.header.frame_id = drone
