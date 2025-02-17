@@ -18,13 +18,17 @@ from lsy_estimators.filterpy import (
 )
 
 if TYPE_CHECKING:
+    from jax import Array as JaxArray
     from numpy.typing import NDArray
+    from torch import Tensor
+
+    Array = NDArray | JaxArray | Tensor
 
 
 class Estimator(ABC):
     """Base class for estimator implementations."""
 
-    def __init__(self, state_dim: int, input_dim: int, obs_dim: int, dt: np.floating):
+    def __init__(self, state_dim: int, input_dim: int, obs_dim: int, dt: float):
         """Initialize basic parameters.
 
         Args:
@@ -50,7 +54,7 @@ class Estimator(ABC):
         """Increment the noise step for time dependent noise classes."""
         pass
 
-    def set_input(self, u: NDArray[np.floating]):
+    def set_input(self, u: Array):
         """Sets the input of the dynamical system. Assuming this class gets called multiple times between controller calls. We therefore store the input as a constant in the class.
 
         Args:
@@ -65,14 +69,14 @@ class KalmanFilter(Estimator):
 
     def __init__(
         self,
-        dt: np.floating,
-        model: str = "first_principles",
-        config: str = "cf2x-",
+        dt: float,
+        model: str = "mellinger_rpyt",  # mellinger_rpyt, fitted_DI_rpy
+        config: str = "cf2x_L250",
         filter_type: str = "UKF",
         estimate_forces_motor: bool = False,
         estimate_forces_dist: bool = False,
         estimate_torques_dist: bool = False,
-        initial_obs: dict[str, NDArray[np.floating]] | None = None,
+        initial_obs: dict[str, Array] | None = None,
     ):  # TODO give obs and info # analytical_mel_att
         """Initialize basic parameters.
 
@@ -108,16 +112,20 @@ class KalmanFilter(Estimator):
         dim_x = UKFData.get_state_dim(self.data)
         # print(f"dim_x={dim_x}")
 
-        Q, R = self.create_covariance_matrices(
-            dim_x=dim_x,
-            dim_z=dim_z,
-            varQ_pos=1e-3,
-            varQ_quat=1e-1,
-            varQ_forces_motor=1e0,
-            varR_pos=1e-8,
-            varR_quat=3e-6,
-            dt=dt,
+        # Q, R = self.create_covariance_matrices(
+        #     dim_x=dim_x,
+        #     dim_z=dim_z,
+        #     varQ_pos=1e-5,
+        #     varQ_quat=1e-4,
+        #     varQ_forces_motor=1e-1,
+        #     varR_pos=1e-8,
+        #     varR_quat=3e-6,
+        #     dt=dt,
+        # )
+        Q = self.create_Q(
+            dim_x=dim_x, varQ_pos=1e-6, varQ_quat=1e-6, varQ_vel=1e-3, varQ_angvel=1e-2, dt=dt
         )
+        R = self.create_R(dim_z=dim_z, varR_pos=1e-8, varR_quat=3e-6, dt=dt)
 
         sigma_settings = SigmaPointsSettings.create(n=dim_x, alpha=1e-3, beta=2.0, kappa=0.0)
         self.settings = UKFSettings.create(
@@ -134,15 +142,15 @@ class KalmanFilter(Estimator):
         self,
         dim_x: int,
         dim_z: int,
-        varQ_pos: np.floating,
-        varQ_quat: np.floating,
-        varQ_forces_motor: np.floating,
-        varR_pos: np.floating,
-        varR_quat: np.floating,
-        dt: np.floating,
-        varQ_forces_dist: np.floating = 1e-9,
-        varQ_torques_dist: np.floating = 1e-12,
-    ) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
+        varQ_pos: float,
+        varQ_quat: float,
+        varQ_forces_motor: float,
+        varR_pos: float,
+        varR_quat: float,
+        dt: float,
+        varQ_forces_dist: float = 1e-9,
+        varQ_torques_dist: float = 1e-12,
+    ) -> tuple[Array, Array]:
         """Creates sophisticated covariance matrices based on a paper.
 
         We assume that the linear elements (pos, vel) are correlated
@@ -176,17 +184,33 @@ class KalmanFilter(Estimator):
         Q[3:7, 10:13] = Q_rot[0, 3]  # quat <-> angvel
         Q[10:13, 3:7] = Q_rot[3, 0]  # quat <-> angvel
 
+        i = 13  # for keeping how big the state (index) is
+
         # Motor forces TODO: maybe add correlation of acceleration (and angular acc) to motor forces
-        Q[13:17] *= varQ_forces_motor  # TODO move index as in dataclass example and make optional
+        if self.data.forces_motor is not None:
+            Q_forces = Q_discrete_white_noise(
+                dim=2, dt=dt, var=varQ_forces_motor, block_size=1, order_by_dim=False
+            )  # Motor Forces
+            print(Q_forces)
+            Q[i : i + 2, i : i + 2] = np.eye(2) * Q_forces[1, 1]  # forces 1&2
+            Q[i + 2 : i + 4, i + 2 : i + 4] = np.eye(2) * Q_forces[1, 1]  # forces 3&4
+            Q[7:10, i : i + 4] = Q_forces[0, 1]  # forces <-> vel
+            Q[i : i + 4, 7:10] = Q_forces[1, 0]  # forces <-> vel
+            Q[10:13, i : i + 4] = (
+                Q_forces[0, 1] * 0.04
+            )  # forces <-> angvel, times arm length (F=rxl)
+            Q[i : i + 4, 10:13] = (
+                Q_forces[1, 0] * 0.04
+            )  # forces <-> angvel, times arm length (F=rxl)
+            # Q[i : i + 4] *= varQ_forces_motor  # TODO move index as in dataclass example and make optional
+            i = i + 4
 
         # External forces and torques TODO Maybe make x and v dependend on F uncertainty and same for torque
         if self.data.forces_dist is not None:  # TODO move index as in dataclass example
-            Q[17:20, 17:20] *= varQ_forces_dist  # Force
+            Q[i : i + 3, i : i + 3] *= varQ_forces_dist  # Force
+            i = i + 3
         if self.data.torques_dist is not None:
-            if self.data.forces_dist is None:
-                Q[17:20, 17:20] *= varQ_torques_dist  # Torque
-            else:
-                Q[20:23, 20:23] *= varQ_torques_dist  # Torque
+            Q[i : i + 3, i : i + 3] *= varQ_torques_dist  # Torque
 
         ### Set measurement noise covariance (tunable). Uncertaints in the measurements. High R -> less trust in measurements
         R = np.eye(dim_z)
@@ -197,15 +221,48 @@ class KalmanFilter(Estimator):
 
         return Q, R
 
+    def create_Q(
+        self,
+        dim_x: int,
+        varQ_pos: float,
+        varQ_quat: float,
+        varQ_vel: float,
+        varQ_angvel: float,
+        dt: float,
+        varQ_forces_motor: float = 1e-1,
+        varQ_forces_dist: float = 1e-9,
+        varQ_torques_dist: float = 1e-12,
+    ) -> Array:
+        Q = np.eye(dim_x)
+        # TODO remove, just for testing
+        Q[0:3] *= varQ_pos
+        Q[3:7] *= varQ_quat
+        Q[7:10] *= varQ_vel
+        Q[10:13] *= varQ_angvel
+        i = 13
+        if self.data.forces_motor is not None:
+            Q[i : i + 4] *= varQ_forces_motor
+            i = i + 4
+        if self.data.forces_dist is not None:
+            Q[i : i + 3, i : i + 3] *= varQ_forces_dist  # Force
+            i = i + 3
+        if self.data.torques_dist is not None:
+            Q[i : i + 3, i : i + 3] *= varQ_torques_dist  # Torque
+        return Q
+
+    def create_R(self, dim_z: int, varR_pos: float, varR_quat: float, dt: float) -> Array:
+        ### Set measurement noise covariance (tunable). Uncertaints in the measurements. High R -> less trust in measurements
+        R = np.eye(dim_z)
+        # very low noise on the position ("mm precision" => even less noise)
+        R[:3, :3] = R[:3, :3] * varR_pos * dt
+        # "high" measurements noise on the angles, estimate: 0.01 constains all values => std=3e-3 TODO look at new quat measurements
+        R[3:, 3:] = R[3:, 3:] * varR_quat * dt
+        return R
+
     # TODO add integration function
     # TODO make sure quaternion lengths stays 1
 
-    def step(
-        self,
-        obs: NDArray[np.floating],
-        dt: np.floating | None = None,
-        u: NDArray[np.floating] | None = None,
-    ) -> UKFData:
+    def step(self, pos: Array, quat: Array, dt: float, command: Array | None = None) -> UKFData:
         """Steps the UKF by one. Doing one prediction and correction step.
 
         Args:
@@ -217,13 +274,14 @@ class KalmanFilter(Estimator):
             New state prediction
         """
         # Update the input
-        if u is not None:
-            self.set_input(u)
+        if command is not None:
+            self.set_input(command)
 
         # Update observation and dt
         # dt hast to be vectorized to work properly in jax
-        if dt is not None and dt > 0:
-            self.data = self.data.replace(z=obs, dt=np.array([dt]))
+
+        if dt > 0:
+            self.data = self.data.replace(z=np.concat((pos, quat)), dt=np.array([dt]))
 
             # if self.data.dt > 0:  # TODO make dt check more elegant and catch all errors
             self.data = ukf_predict_correct(self.data, self.settings)

@@ -37,7 +37,7 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     # Calculate sigma pointstf.transform.rotation.x,
     # TODO special sigma points for quaternions!
     sigmas = ukf_calculate_sigma_points(data, settings)
-    data_sigmas = UKFData.from_array(data, sigmas)
+    data_sigmas = UKFData.from_state_array(data, sigmas)
 
     # Pass sigma points through dynamics
     pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot = settings.fx(
@@ -51,6 +51,7 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
         command=data.u,
     )
     data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot)
+    # print(f"derivatives: {data_sigmas_dot.angvel}")
     # sigmas_dot = QuadrotorState.as_array(sigma_states_dot)
 
     # print(f"function call = {(t2 - t1) * 1000}ms, as_array = {(t3 - t2) * 1000}ms")
@@ -64,7 +65,7 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     # )  # TODO jax cant do that in place
     # data = data.replace(sigmas_f=sigmas_f)
     data_sigmas_f = integrate_UKFData(data_sigmas, data_sigmas_dot)
-    sigmas_f = UKFData.as_array(data_sigmas_f)
+    sigmas_f = UKFData.as_state_array(data_sigmas_f)
 
     # Compute prior with unscented transform
     x, P = ukf_unscented_transform(
@@ -77,7 +78,17 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     #### Correct
     # Pass prior sigmas through measurment function h(x,u,dt) to get measurement sigmas
     # sigmas_h = settings.hx(sigmas_f, data.u, data.dt)
-    sigmas_h = sigmas_f[..., :7]  # TODO replace this Ghetto version with hx
+    sigmas_h = settings.hx(
+        pos=data_sigmas_f.pos,
+        quat=data_sigmas_f.quat,
+        vel=data_sigmas_f.vel,
+        angvel=data_sigmas_f.angvel,
+        forces_motor=data_sigmas_f.forces_motor,
+        forces_dist=data_sigmas_f.forces_dist,
+        torques_dist=data_sigmas_f.torques_dist,
+        command=data.u,
+    )
+    # sigmas_h = sigmas_f[..., :7]  # TODO replace this Ghetto version with hx
     # data = data.replace(sigmas_h=sigmas_h)
 
     # Pass mean and covariance of prediction through unscented transform
@@ -98,10 +109,15 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
 
     # Update Gaussian state estimate (x, P)
     x = x + xp.dot(K, y)
-    P = P - xp.dot(K, xp.dot(S, K.T))
+    # print(f"P prior = {xp.diag(P)}")
+    # print(f"P prior = \n{P}")
+    # Added identity for numerical stability
+    P = P - xp.dot(K, xp.dot(S, K.T)) + xp.eye(like=P) * 1e-10
+    # print(f"P post = {xp.diag(P)}")
+    # print(f"P post = \n{P}")
 
     # Save posterior
-    data = UKFData.from_array(data, x)
+    data = UKFData.from_state_array(data, x)
     data = data.replace(covariance=P)
 
     return data

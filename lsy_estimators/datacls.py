@@ -8,25 +8,29 @@ import numpy as np
 from flax.struct import Callable, dataclass
 
 if TYPE_CHECKING:
+    from jax import Array as JaxArray
     from numpy.typing import NDArray
+    from torch import Tensor
+
+    Array = NDArray | JaxArray | Tensor
 
 
 @dataclass
 class UKFData:
     """TODO."""
 
-    pos: NDArray[np.floating]
-    quat: NDArray[np.floating]
-    vel: NDArray[np.floating]
-    angvel: NDArray[np.floating]
-    forces_motor: NDArray[np.floating] | None
-    forces_dist: NDArray[np.floating] | None
-    torques_dist: NDArray[np.floating] | None
-    covariance: NDArray[np.floating]  # Covariance matrix
+    pos: Array
+    quat: Array
+    vel: Array
+    angvel: Array
+    forces_motor: Array | None
+    forces_dist: Array | None
+    torques_dist: Array | None
+    covariance: Array  # Covariance matrix
 
-    u: NDArray[np.floating]  # input
-    z: NDArray[np.floating]  # measurement
-    dt: np.floating
+    u: Array  # input
+    z: Array  # measurement
+    dt: float
 
     @classmethod
     def create_empty(
@@ -72,14 +76,14 @@ class UKFData:
     @classmethod
     def create(
         cls,
-        pos: NDArray,
-        quat: NDArray,
-        vel: NDArray,
-        angvel: NDArray,
-        forces_motor: NDArray | None = None,
-        forces_dist: NDArray | None = None,
-        torques_dist: NDArray | None = None,
-    ) -> UKFData:  # TODO enable to enter everything!
+        pos: Array,
+        quat: Array,
+        vel: Array,
+        angvel: Array,
+        forces_motor: Array | None = None,
+        forces_dist: Array | None = None,
+        torques_dist: Array | None = None,
+    ) -> UKFData:
         """TODO."""
         dim_x = 13
         if forces_motor is None:
@@ -100,7 +104,7 @@ class UKFData:
         )
 
     @classmethod
-    def as_array(cls, data: UKFData) -> NDArray:
+    def as_state_array(cls, data: UKFData) -> Array:
         """Returns the state as an array."""
         xp = data.pos.__array_namespace__()
         x = xp.concat((data.pos, data.quat, data.vel, data.angvel), axis=-1)
@@ -113,7 +117,7 @@ class UKFData:
         return x
 
     @classmethod
-    def from_array(cls, data: UKFData, array: NDArray) -> UKFData:
+    def from_state_array(cls, data: UKFData, array: Array) -> UKFData:
         """Updates data in the given structure based on a given array."""
         pos = array[..., 0:3]
         quat = array[..., 3:7]
@@ -164,19 +168,25 @@ class UKFSettings:
     """TODO."""
 
     SPsettings: SigmaPointsSettings
-    Q: NDArray[np.floating]
-    R: NDArray[np.floating]
-    fx: Callable
-    hx: Callable
+    Q: Array
+    R: Array
+    fx: Callable[
+        [Array, Array, Array, Array, Array, Array, Array | None, Array | None],
+        tuple[Array, Array, Array, Array, Array | None],
+    ]
+    hx: Callable[[Array, Array, Array, Array, Array, Array, Array | None, Array | None], Array]
 
     @classmethod
     def create(
         cls,
         SPsettings: SigmaPointsSettings,
-        Q: NDArray[np.floating],
-        R: NDArray[np.floating],
-        fx: Callable[[NDArray], NDArray],  # TODO full signature
-        hx: Callable[[NDArray], NDArray],  # TODO full signature
+        Q: Array,
+        R: Array,
+        fx: Callable[
+            [Array, Array, Array, Array, Array, Array, Array | None, Array | None],
+            tuple[Array, Array, Array, Array, Array | None],
+        ],
+        hx: Callable[[Array, Array, Array, Array, Array, Array, Array | None, Array | None], Array],
     ) -> UKFSettings:
         """TODO."""
         return cls(SPsettings, Q, R, fx, hx)
@@ -191,8 +201,8 @@ class SigmaPointsSettings:
     beta: float
     kappa: float
     lambda_: float
-    Wc: NDArray[np.floating]
-    Wm: NDArray[np.floating]
+    Wc: Array
+    Wm: Array
 
     @classmethod
     def create(cls, n: int, alpha: float, beta: float, kappa: float = 0.0) -> SigmaPointsSettings:
