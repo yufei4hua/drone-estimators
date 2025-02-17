@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import sys
 import multiprocessing as mp
-import threading
 import os
+import signal
+import sys
+import threading
 import time
 from collections import deque
 from typing import TYPE_CHECKING
@@ -56,7 +57,7 @@ class EstimatorNode(Node):
     """
 
     def __init__(self, drone: str):
-        super().__init__(f"Estimator_{drone}")  # Can put text into init to give it a name
+        super().__init__(f"Estimator_{drone}")
         self.lock = threading.Lock()
         self.drone = drone
         sec, _ = self.get_clock().now().seconds_nanoseconds()
@@ -205,6 +206,17 @@ class EstimatorNode(Node):
         wrench = create_wrench(header, self.drone, state.forces_dist, state.torques_dist)
         self.publisher_wrench.publish(wrench)
 
+    def shutdown(self, signum, frame):
+        self.subscriber_frames.destroy()
+        self.subscriber_control.destroy()
+        time.sleep(0.1)
+        self.publisher_pose.destroy()
+        self.publisher_twist.destroy()
+        self.publisher_forces.destroy()
+        self.publisher_wrench.destroy()
+        # time.sleep(0.1)
+        self.destroy_node()
+
 
 def launch_estimators_MP(drones: list):
     """TODO."""
@@ -219,7 +231,7 @@ def launch_estimators_MP(drones: list):
 
         while True:
             try:
-                time.sleep(1)
+                time.sleep(0.1)
             except KeyboardInterrupt:
                 print("\nKeyboard interrupt received. Terminating nodes...")
                 break
@@ -229,7 +241,7 @@ def launch_estimators_MP(drones: list):
             stop_event.set()
 
         for process, _ in processes:
-            process.join(timeout=5)
+            process.join(timeout=2)
 
         for process, _ in processes:
             if process.is_alive():
@@ -237,53 +249,28 @@ def launch_estimators_MP(drones: list):
                 process.terminate()
                 process.join()
 
-        # rclpy.shutdown()  # Shutdown rclpy after all processes are stopped
+        if rclpy.ok():
+            rclpy.shutdown()
         print("All nodes terminated.")
-        # rclpy.shutdown()
-
-        # Cleanup: Kill all processes
-        # for p in processes:
-        #     print(f"Terminating process {p.pid}")
-        #     p.terminate()
-        # print("Waiting for join")
-        # for p in processes:
-        #     p.join()
-        # rclpy.shutdown()
-        # print("All nodes terminated.")
-
-    # try:
-    #     while rclpy.ok():
-    #         rate.sleep()
-    # except KeyboardInterrupt:
-    #     pass
-
-    # for p in processes:
-    #     p.join()
-
-    # try:
-    #     while rclpy.ok():
-    #         time.sleep(1)
-    # finally:
-    #     for p in processes:
-    #         print("terminated")
-    #         p.terminate()
-
-    # rclpy.shutdown()
 
 
 def launch_node(drone: str, stop_event: threading.Event):
     """TODO."""
     node = EstimatorNode(drone)
+
     print(f"[ESTIMATOR]: Added estimator for {drone} (process {os.getpid()})")
+
+    signal.signal(signal.SIGINT, node.shutdown)
+
     try:
         while rclpy.ok() and not stop_event.is_set():
             rclpy.spin_once(node, timeout_sec=0.1)
-            # rclpy.spin(node)
     finally:
         pass
 
-    print(f"destroying node {drone}")
-    node.destroy_node()
+        # print(f"destroying node {drone}")
+        # node.destroy_node()
+    time.sleep(0.5)
     rclpy.shutdown()
 
 
