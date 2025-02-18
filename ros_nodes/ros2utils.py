@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -10,6 +9,8 @@ from geometry_msgs.msg import PoseStamped, TransformStamped, TwistStamped, Wrenc
 from std_msgs.msg import Float64MultiArray
 
 if TYPE_CHECKING:
+    from collections import defaultdict
+
     from jax import Array as JaxArray
     from numpy.typing import NDArray
     from std_msgs.msg import Header
@@ -121,7 +122,7 @@ def create_wrench(
 
 
 def append_state(data: defaultdict[str, list], time: float, state: UKFData):
-    """TODO."""
+    """Appends each states data to the corresponding of list in the dictionary."""
     data["time"].append(time)
     data["pos"].append(state.pos)
     data["quat"].append(state.quat)
@@ -129,16 +130,22 @@ def append_state(data: defaultdict[str, list], time: float, state: UKFData):
     data["angvel"].append(state.angvel)
     if state.forces_motor is not None:
         data["forces_motor"].append(state.forces_motor)
+    else:
+        data["forces_motor"] = None
     if state.forces_motor is not None:
         data["forces_dist"].append(state.forces_dist)
+    else:
+        data["forces_dist"] = None
     if state.forces_motor is not None:
         data["torques_dist"].append(state.torques_dist)
+    else:
+        data["torques_dist"] = None
 
 
 def append_measurement(
     data: defaultdict[str, list], time: float, pos: Array, quat: Array, command: Array
 ):
-    """TODO."""
+    """Appends each measurment data to the corresponding of list in the dictionary."""
     data["time"].append(time)
     data["pos"].append(pos)
     data["quat"].append(quat)
