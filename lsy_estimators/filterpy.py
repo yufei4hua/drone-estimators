@@ -112,7 +112,7 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     # print(f"P prior = {xp.diag(P)}")
     # print(f"P prior = \n{P}")
     # Added identity for numerical stability
-    P = P - xp.dot(K, xp.dot(S, K.T)) + xp.eye(like=P) * 1e-10
+    P = P - xp.dot(K, xp.dot(S, K.T)) + xp.eye(P.shape[0]) * 1e-10
     # print(f"P post = {xp.diag(P)}")
     # print(f"P post = \n{P}")
 
@@ -191,7 +191,7 @@ def ukf_calculate_sigma_points(data: UKFData, settings: UKFSettings) -> NDArray[
         (settings.SPsettings.lambda_ + settings.SPsettings.n) * data.covariance, upper=True
     )
 
-    state_array = UKFData.as_array(data)
+    state_array = UKFData.as_state_array(data)
     sigma_center = state_array
     # TODO for the quaternions use more sophisitcated approach to keep length 1!
     # Mainly: rotate in tangent space

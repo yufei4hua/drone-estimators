@@ -1,20 +1,24 @@
 # Simly add your estimators as shown below
 
 # Supported types: legacy, UKF
-# Supported models: See lsy_models.models.available_models
+# Supported models: See lsy_models.models.available_models, i.e. fitted_DI_rpy, mellinger_rpyt
+
+[debug]
+timings = true   # print the timings of each estimator
+save_data = true # store the raw data and estimates into pickle files
 
 [estimator1]
-type = "legacy"
-drone_name = "cf90"
-model = "fitted_DI_rpy"
+type = "ukf"
+drone_name = "cf6"
+model = "mellinger_rpyt"
 estimate_forces_motor = false
-estimate_forces_dist = false
-estimate_torques_dist = false
+estimate_forces_dist = true
+estimate_torques_dist = true
 
-[estimator2]
-type = "legacy"
-drone_name = "cf97"
-model = "fitted_DI_rpy"
-estimate_forces_motor = false
-estimate_forces_dist = false
-estimate_torques_dist = false
+# [estimator2]
+# type = "legacy"
+# drone_name = "cf97"
+# model = "fitted_DI_rpy"
+# estimate_forces_motor = false
+# estimate_forces_dist = false
+# estimate_torques_dist = false

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -13,6 +14,8 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from std_msgs.msg import Header
     from torch import Tensor
+
+    from lsy_estimators.datacls import UKFData
 
     Array = NDArray | JaxArray | Tensor
 
@@ -115,3 +118,28 @@ def create_wrench(
         wrench.wrench.torque.z = 0.0
 
     return wrench
+
+
+def append_state(data: defaultdict[str, list], time: float, state: UKFData):
+    """TODO."""
+    data["time"].append(time)
+    data["pos"].append(state.pos)
+    data["quat"].append(state.quat)
+    data["vel"].append(state.vel)
+    data["angvel"].append(state.angvel)
+    if state.forces_motor is not None:
+        data["forces_motor"].append(state.forces_motor)
+    if state.forces_motor is not None:
+        data["forces_dist"].append(state.forces_dist)
+    if state.forces_motor is not None:
+        data["torques_dist"].append(state.torques_dist)
+
+
+def append_measurement(
+    data: defaultdict[str, list], time: float, pos: Array, quat: Array, command: Array
+):
+    """TODO."""
+    data["time"].append(time)
+    data["pos"].append(pos)
+    data["quat"].append(quat)
+    data["command"].append(command)

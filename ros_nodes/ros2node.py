@@ -1,17 +1,23 @@
+"""This file contains the estimator node for ROS 2.
+
+Essentially this file provides a wrapper for the estimators to be used with ROS data. The estimates get published to ROS as well.
+
+TODO Subscribed and published topics...
+"""
+
 from __future__ import annotations
 
 import argparse
 import multiprocessing as mp
 import os
+import pickle
 import signal
-import sys
 import threading
 import time
-from collections import deque
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import lsy_models.utils.rotation as R
 import numpy as np
 import rclpy
 import toml
@@ -26,6 +32,8 @@ from tf2_msgs.msg import TFMessage
 from lsy_estimators.estimator import KalmanFilter
 from lsy_estimators.estimator_legacy import StateEstimator
 from ros_nodes.ros2utils import (
+    append_measurement,
+    append_state,
     create_array,
     create_pose,
     create_twist,
@@ -36,7 +44,6 @@ from ros_nodes.ros2utils import (
 )
 
 if TYPE_CHECKING:
-    from numpy.typing import NDArray
     from std_msgs.msg import Header
 
     from lsy_estimators.datacls import UKFData
@@ -64,7 +71,11 @@ class EstimatorNode(Node):
         self.time_stamp_last_command = sec
         self.perf_timings = deque(maxlen=5000)
 
-        match settings.type:
+        # This is for storing the data (DEBUG_SAVE_DATA)
+        self.data_meas = defaultdict(list)  # {"time": [], "pos": [], "quat": [], "command": []}
+        self.data_est = defaultdict(list)
+
+        match self.settings.type:
             case "legacy":
                 self.estimator = StateEstimator((0.0001, 0.007, 0.09, 0.005, 0.07))
                 if (
@@ -72,7 +83,7 @@ class EstimatorNode(Node):
                     or settings.estimate_forces_dist
                     or settings.estimate_torques_dist
                 ):
-                    node.get_logger().warning(
+                    self.get_logger().warning(
                         "Legacy estimator does not support force or torque estimation!"
                     )
             case "ukf":
@@ -83,6 +94,8 @@ class EstimatorNode(Node):
                     estimate_forces_dist=settings.estimate_forces_dist,
                     estimate_torques_dist=settings.estimate_torques_dist,
                 )
+            case _:
+                raise NotImplementedError(f"Estimator type {self.settings.type} not implemented.")
 
         # A better implementation would be:
         # https://docs.ros.org/en/foxy/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
@@ -143,18 +156,29 @@ class EstimatorNode(Node):
                     )
                     self.time_stamp_last_measurement = time_stamp
                     self.time_stamp_last_command = time_stamp
-                elif dt > 1e-3:  # accepting the new data point
+                elif dt > 1e-4:  # accepting the new data point
                     # self.get_logger().info(f"dt={dt}")
                     self.time_stamp_last_measurement = time_stamp
                     t1 = time.perf_counter()
                     estimated_state = self.estimator.step(pos_meas, quat_meas, dt)
                     t2 = time.perf_counter()
-                    self.perf_timings.append(t2 - t1)
-                    self.get_logger().info(
-                        f"Step time avg = {(np.mean(self.perf_timings)) * 1000:.3f}ms",
-                        throttle_duration_sec=1.0,
-                    )
+                    if DEBUG_TIMINGS:
+                        self.perf_timings.append(t2 - t1)
+                        t_avg = np.mean(self.perf_timings) * 1000
+                        t_max = np.max(self.perf_timings) * 1000
+                        t_min = np.min(self.perf_timings) * 1000
+                        self.get_logger().info(
+                            f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms",
+                            throttle_duration_sec=2.0,
+                        )
                     self.publish_state(header, estimated_state)
+
+                    if DEBUG_SAVE_DATA:
+                        # AFTER publishing, we have time to store the data
+                        append_measurement(
+                            self.data_meas, time_stamp, pos_meas, quat_meas, self.estimator.data.u
+                        )
+                        append_state(self.data_est, time_stamp, estimated_state)
                 else:
                     self.get_logger().info(
                         f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Skipping data point..."
@@ -166,13 +190,13 @@ class EstimatorNode(Node):
                 if dt_cmd > 1:
                     # TODO Move this into Kalman Filter
                     # TODO Change varQ_forces_motor based on how old the estimate is
+                    # TODO change process and input noise depending on measurement
                     if self.settings.type != "legacy":
                         self.get_logger().warning(
                             f"Haven't received a new command in {dt_cmd:.0f}s. Setting it to zero.",
-                            throttle_duration_sec=1.0,
+                            throttle_duration_sec=5.0,
                         )
-                        control = Float64MultiArray(data=[0.0, 0.0, 0.0, 0.0])
-                        self.update_control(control)
+                        self.estimator.set_input(np.zeros(4))
         finally:
             self.lock.release()  # Ensure lock is released
 
@@ -223,6 +247,14 @@ class EstimatorNode(Node):
 
     def shutdown(self, _, __):
         """TODO."""
+        self.get_logger().info("Terminating")
+        if DEBUG_SAVE_DATA:
+            self.get_logger().info("Saving data...")
+            filename = f"data_{self.settings.drone_name}_"
+            with open(filename + f"{self.settings.type}" + ".pkl", "wb") as f:
+                pickle.dump(self.data_est, f)
+            with open(filename + "measurement" + ".pkl", "wb") as f:
+                pickle.dump(self.data_meas, f)
         self.subscriber_frames.destroy()
         self.subscriber_control.destroy()
         time.sleep(0.1)
@@ -241,17 +273,18 @@ def launch_estimators(estimators: dict):
     seen_drone_names = []
     try:
         for k, v in estimators.items():
-            settings = v
-            name = settings.drone_name
-            if name in seen_drone_names:
-                print(f"[ESTIMATOR]: Estimator for {name} already existing. Check settings")
-            else:
-                seen_drone_names.append(name)
-                stop_event = mp.Event()
-                # not sure if daemon should be True or False
-                p = mp.Process(target=launch_node, args=(settings, stop_event), daemon=True)
-                processes.append((p, stop_event))
-                p.start()
+            if k.startswith("estimator"):
+                settings = v
+                name = settings.drone_name
+                if name in seen_drone_names:
+                    print(f"[ESTIMATOR]: Estimator for {name} already existing. Check settings")
+                else:
+                    seen_drone_names.append(name)
+                    stop_event = mp.Event()
+                    # not sure if daemon should be True or False
+                    p = mp.Process(target=launch_node, args=(settings, stop_event), daemon=True)
+                    processes.append((p, stop_event))
+                    p.start()
 
         while True:
             try:
@@ -310,6 +343,16 @@ if __name__ == "__main__":
     with open(path, "r") as f:
         estimators = munchify(toml.load(f))
 
+    # Global debug settings. Defaulting to False
+    debug_settings = estimators.get("debug", {})
+    DEBUG_TIMINGS = debug_settings.get("timings", False)
+    DEBUG_SAVE_DATA = debug_settings.get("save_data", False)
+
     launch_estimators(estimators)
 
-    # launch_estimators_MP(args.drones)
+    # only launch first one. For testing only... TODO remove
+    # settings = estimators["estimator1"]
+    # rclpy.init()
+    # node = EstimatorNode(settings)
+    # rclpy.spin(node)
+    # rclpy.shutdown()
