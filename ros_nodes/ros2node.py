@@ -65,6 +65,7 @@ class EstimatorNode(Node):
         """TODO."""
         super().__init__(f"Estimator_{settings.drone_name}")
         self.lock = threading.Lock()
+        self.input_needed = False
         self.settings = settings
         sec, _ = self.get_clock().now().seconds_nanoseconds()
         self.time_stamp_last_measurement = sec
@@ -75,7 +76,7 @@ class EstimatorNode(Node):
         self.data_meas = defaultdict(list)  # {"time": [], "pos": [], "quat": [], "command": []}
         self.data_est = defaultdict(list)
 
-        match self.settings.type:
+        match self.settings.estimator_type:
             case "legacy":
                 self.estimator = StateEstimator((0.0001, 0.007, 0.09, 0.005, 0.07))
                 if (
@@ -87,15 +88,18 @@ class EstimatorNode(Node):
                         "Legacy estimator does not support force or torque estimation!"
                     )
             case "ukf":
+                self.input_needed = True
                 self.estimator = KalmanFilter(
                     dt=1.0 / 200,
-                    model=settings.model,  # mellinger_rpyt, fitted_DI_rpy
+                    model=settings.dynamics_model,  # mellinger_rpyt, fitted_DI_rpy
                     estimate_forces_motor=settings.estimate_forces_motor,
                     estimate_forces_dist=settings.estimate_forces_dist,
                     estimate_torques_dist=settings.estimate_torques_dist,
                 )
             case _:
-                raise NotImplementedError(f"Estimator type {self.settings.type} not implemented.")
+                raise NotImplementedError(
+                    f"Estimator type {self.settings.estimator_type} not implemented."
+                )
 
         # A better implementation would be:
         # https://docs.ros.org/en/foxy/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
@@ -175,9 +179,22 @@ class EstimatorNode(Node):
 
                     if DEBUG_SAVE_DATA:
                         # AFTER publishing, we have time to store the data
-                        append_measurement(
-                            self.data_meas, time_stamp, pos_meas, quat_meas, self.estimator.data.u
-                        )
+                        if not self.input_needed:
+                            append_measurement(
+                                self.data_meas,
+                                time_stamp,
+                                pos_meas,
+                                quat_meas,
+                                [0.0, 0.0, 0.0, 0.0],
+                            )
+                        else:
+                            append_measurement(
+                                self.data_meas,
+                                time_stamp,
+                                pos_meas,
+                                quat_meas,
+                                self.estimator.data.u,
+                            )
                         append_state(self.data_est, time_stamp, estimated_state)
                 else:
                     self.get_logger().info(
@@ -191,7 +208,7 @@ class EstimatorNode(Node):
                     # TODO Move this into Kalman Filter
                     # TODO Change varQ_forces_motor based on how old the estimate is
                     # TODO change process and input noise depending on measurement
-                    if self.settings.type != "legacy":
+                    if self.input_needed:
                         self.get_logger().warning(
                             f"Haven't received a new command in {dt_cmd:.0f}s. Setting it to zero.",
                             throttle_duration_sec=5.0,
@@ -251,7 +268,10 @@ class EstimatorNode(Node):
         if DEBUG_SAVE_DATA:
             self.get_logger().info("Saving data...")
             filename = f"data_{self.settings.drone_name}_"
-            with open(filename + f"{self.settings.type}" + ".pkl", "wb") as f:
+            info = f"{self.settings.estimator_type}"
+            if self.settings.estimator_type != "legacy":
+                info = info + f"_{self.settings.dynamics_model}"
+            with open(filename + info + ".pkl", "wb") as f:
                 pickle.dump(self.data_est, f)
             with open(filename + "measurement" + ".pkl", "wb") as f:
                 pickle.dump(self.data_meas, f)
