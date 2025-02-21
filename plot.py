@@ -155,7 +155,7 @@ def plotaxs1(
     #     color="tab:orange",
     # )  # plotting 3 std
 
-    axs1[2, 2].plot(data["time"], data["vel"][:, 0], linestyle, label=label, color=color)
+    axs1[2, 2].plot(data["time"], data["vel"][:, 2], linestyle, label=label, color=color)
 
     # axs1[2, 2].fill_between(
     #     data["time_est"],
@@ -478,17 +478,31 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     ### Data preprocessing
     ##################################################
     # Calculating measured vel and angvel from finite differences
-    filter_length, filter_order = 20, 2
-    print(data_meas["pos"].shape, data_meas["quat"].shape)
-    pos_meas_filtered = savgol_filter(data_meas["pos"], filter_length, filter_order, axis=0)
-    data_meas["pos"] = pos_meas_filtered  # TODO remove
-    data_meas["vel"] = np.gradient(pos_meas_filtered, data_meas["time"], axis=0)
-    quat_meas_filtered = savgol_filter(data_meas["quat"], filter_length, filter_order, axis=0)
+    filter_length, filter_order = 51, 1  # length/200Hz = length in [s]
+    dt_avg = np.mean(np.diff(data_meas["time"]))
+    print(f"dt_avg={dt_avg}")
+
+    # pos_meas_filtered = savgol_filter(data_meas["pos"], filter_length, filter_order, axis=0)
+    # data_meas["pos"] = pos_meas_filtered  # TODO remove?
+    # data_meas["vel"] = np.gradient(pos_meas_filtered, data_meas["time"], axis=0)
+    # data_meas["vel"] = savgol_filter(data_meas["vel"], filter_length, filter_order, axis=0)
+    data_meas["vel"] = savgol_filter(data_meas["pos"], 51, 1, deriv=1, delta=dt_avg, axis=0)
+
+    quat_meas_filtered = savgol_filter(data_meas["quat"], 7, 2, axis=0)
     data_meas["quat"] = quat_meas_filtered  # TODO remove?
-    dquat = np.gradient(quat_meas_filtered, data_meas["time"], axis=0)
-    data_meas["angvel"] = dquat2angvel(
-        quat_meas_filtered, dquat, np.diff(data_meas["time"], prepend=1.0 / 200)
-    )
+    data_meas = quat2rpy(data_meas)
+
+    rot = R.from_euler("xyz", data_meas["rpy"], degrees=True)
+    rpy_dot = savgol_filter(data_meas["rpy"], 11, 1, deriv=1, delta=dt_avg, axis=0)
+    data_meas["angvel"] = rpy_dot / 180 * np.pi
+    # data_meas["angvel"] = rot.apply(rpy_dot / 180 * np.pi)
+
+    # dquat = np.gradient(quat_meas_filtered, data_meas["time"], axis=0)
+    # dquat_filtered = savgol_filter(data_meas["quat"], 7, 2, deriv=1, delta=dt_avg, axis=0)
+    # data_meas["angvel"] = dquat2angvel(
+    #     quat_meas_filtered, dquat_filtered, np.diff(data_meas["time"], prepend=1.0 / 200)
+    # )
+    # data_meas["angvel"] = savgol_filter(data_meas["angvel"], 7, 2, deriv=1, delta=dt_avg, axis=0)
 
     # Interpolating maybe? TODO
 
@@ -604,12 +618,15 @@ def dquat2angvel(quat, dquat, dt):
     else:
         axis = np.array([1, 0, 0])  # Default axis if too small
 
-    return (angle / dt)[..., None] * axis
+    angvel = (angle / dt)[..., None] * axis
+
+    # return angvel
+    return R.from_quat(quat).apply(angvel)  # RPY rates
 
 
 if __name__ == "__main__":
     drone_name = "cf6"
-    estimator_types = ["legacy", "ukf_mellinger_rpyt"]
+    estimator_types = ["legacy"]  # , "ukf_fitted_DI_rpy", "ukf_mellinger_rpyt"
     estimator_datasets = []
 
     path = os.path.dirname(os.path.abspath(__file__))
