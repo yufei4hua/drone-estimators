@@ -112,7 +112,7 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     # print(f"P prior = {xp.diag(P)}")
     # print(f"P prior = \n{P}")
     # Added identity for numerical stability
-    P = P - xp.dot(K, xp.dot(S, K.T)) + xp.eye(P.shape[0]) * 1e-10
+    P = P - xp.dot(K, xp.dot(S, K.T))  # + xp.eye(P.shape[0]) * 1e-9
     # print(f"P post = {xp.diag(P)}")
     # print(f"P post = \n{P}")
 
@@ -187,9 +187,11 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
 def ukf_calculate_sigma_points(data: UKFData, settings: UKFSettings) -> NDArray[np.floating]:
     """TODO."""
     xp = data.pos.__array_namespace__()
-    U = xp.linalg.cholesky(
-        (settings.SPsettings.lambda_ + settings.SPsettings.n) * data.covariance, upper=True
-    )
+    P = data.covariance
+    # Adding some very small identity part for numerical stability
+    # Note: Higher values make the system more stable for the cost of more noise!
+    P = P + xp.eye(P.shape[0]) * 1e-12
+    U = xp.linalg.cholesky((settings.SPsettings.lambda_ + settings.SPsettings.n) * P, upper=True)
 
     state_array = UKFData.as_state_array(data)
     sigma_center = state_array
