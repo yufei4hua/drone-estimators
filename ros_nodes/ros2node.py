@@ -64,7 +64,6 @@ class EstimatorNode(Node):
     def __init__(self, settings: Munch):
         """TODO."""
         super().__init__(f"Estimator_{settings.drone_name}")
-        self.lock = threading.Lock()
         self.input_needed = False
         self.initial_observation = None
         self.settings = settings
@@ -105,122 +104,108 @@ class EstimatorNode(Node):
         # A better implementation would be:
         # https://docs.ros.org/en/foxy/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
         # But for now this works and we don't care about a fixed publishing frequency
-        self.subscriber_frames = self.create_subscription(TFMessage, "/tf", self.estimate_state, 2)
+        self.subscriber_frames = self.create_subscription(TFMessage, "/tf", self.estimate_state, 1)
 
         self.subscriber_control = self.create_subscription(
-            Float64MultiArray, f"/command_{self.settings.drone_name}", self.update_control, 2
+            Float64MultiArray, f"/command_{self.settings.drone_name}", self.update_control, 1
         )
 
         self.publisher_pose = self.create_publisher(
-            PoseStamped, f"/estimated_state_pose_{self.settings.drone_name}", 2
+            PoseStamped, f"/estimated_state_pose_{self.settings.drone_name}", 1
         )  # pos, quat
         self.publisher_twist = self.create_publisher(
-            TwistStamped, f"/estimated_state_twist_{self.settings.drone_name}", 2
+            TwistStamped, f"/estimated_state_twist_{self.settings.drone_name}", 1
         )  # vel, angvel
         self.publisher_forces = self.create_publisher(
-            Float64MultiArray, f"/estimated_state_forces_{self.settings.drone_name}", 2
+            Float64MultiArray, f"/estimated_state_forces_{self.settings.drone_name}", 1
         )  # f_motors
         self.publisher_wrench = self.create_publisher(
-            WrenchStamped, f"/estimated_state_wrench_{self.settings.drone_name}", 2
+            WrenchStamped, f"/estimated_state_wrench_{self.settings.drone_name}", 1
         )  # f_dis, t_dis
 
         self.get_logger().info(f"Started estimator (process {os.getpid()})")
 
     def estimate_state(self, msg: TFMessage):
         """Estimates the full drone state based on the new measurements."""
-        # TODO: implement warning if the control hasn't been updated in a long time!
-        if not self.lock.acquire(blocking=False):
+        tf = find_transform(msg.transforms, self.settings.drone_name)
+        if tf is None:
             self.get_logger().warning(
-                "New measurements before finishing estimation. Can't keep up...",
+                f"Drone {self.settings.drone_name} could not have been found. Occluded?",
                 throttle_duration_sec=0.5,
             )
-            return
+        else:
+            header, pos_meas, quat_meas = tf2array(tf)
+            time_stamp = header2sec(header)
+            dt = time_stamp - self.time_stamp_last_measurement
 
-        try:
-            tf = find_transform(msg.transforms, self.settings.drone_name)
-            if tf is None:
-                self.get_logger().warning(
-                    f"Drone {self.settings.drone_name} could not have been found. Occluded?",
-                    throttle_duration_sec=0.5,
-                )
-            else:
-                header, pos_meas, quat_meas = tf2array(tf)
-                time_stamp = header2sec(header)
-                dt = time_stamp - self.time_stamp_last_measurement
+            if self.initial_observation is None:
+                self.initial_observation = (pos_meas, quat_meas)
+                self.estimator.set_state(pos_meas, quat_meas)
 
-                if self.initial_observation is None:
-                    self.initial_observation = (pos_meas, quat_meas)
-                    self.estimator.set_state(pos_meas, quat_meas)
+            # self.get_logger().info(
+            #     f"New Measurement for {self.settings.drone_name}: time={time_stamp}, pos_meas={pos_meas}, quat_meas={quat_meas}"
+            # )
 
-                # self.get_logger().info(
-                #     f"New Measurement for {self.settings.drone_name}: time={time_stamp}, pos_meas={pos_meas}, quat_meas={quat_meas}"
-                # )
+            # rot = R.from_quat(quat_meas)
+            # print(f"rpy_meas={rot.as_euler('xyz', degrees=True)}")
 
-                # rot = R.from_quat(quat_meas)
-                # print(f"rpy_meas={rot.as_euler('xyz', degrees=True)}")
+            if dt < 0:  # This should only be executed when playing rosbags
+                self.get_logger().warning("dt < 0s! Assuming rosbag is played. Setting time to now")
+                self.time_stamp_last_measurement = time_stamp
+                self.time_stamp_last_command = time_stamp
+            elif dt > 1e-4:  # accepting the new data point
+                self.time_stamp_last_measurement = time_stamp
+                t1 = time.perf_counter()
+                estimated_state = self.estimator.step(pos_meas, quat_meas, dt)
+                self.publish_state(header, estimated_state)
+                t2 = time.perf_counter()
+                perf_time = t2 - t1
 
-                if dt < 0:  # This should only be executed when playing rosbags
+                if perf_time > 5e-3:
                     self.get_logger().warning(
-                        "dt < 0s! Assuming rosbag is played. Setting time to now"
+                        f"Prediction time >5ms ({(t2 - t1) * 1e3:2f}). New data was probably dropped.",
+                        throttle_duration_sec=0.5,
                     )
-                    self.time_stamp_last_measurement = time_stamp
-                    self.time_stamp_last_command = time_stamp
-                elif dt > 1e-4:  # accepting the new data point
-                    # self.get_logger().info(f"dt={dt}")
-                    self.time_stamp_last_measurement = time_stamp
-                    t1 = time.perf_counter()
-                    estimated_state = self.estimator.step(pos_meas, quat_meas, dt)
-                    t2 = time.perf_counter()
-                    if DEBUG_TIMINGS:
-                        self.perf_timings.append(t2 - t1)
-                        t_avg = np.mean(self.perf_timings) * 1000
-                        t_max = np.max(self.perf_timings) * 1000
-                        t_min = np.min(self.perf_timings) * 1000
-                        self.get_logger().info(
-                            f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms, datapoints {len(self.perf_timings)}",
-                            throttle_duration_sec=2.0,
-                        )
-                    self.publish_state(header, estimated_state)
 
-                    if DEBUG_SAVE_DATA:
-                        # AFTER publishing, we have time to store the data
-                        if not self.input_needed:
-                            append_measurement(
-                                self.data_meas,
-                                time_stamp,
-                                pos_meas,
-                                quat_meas,
-                                [0.0, 0.0, 0.0, 0.0],
-                            )
-                        else:
-                            append_measurement(
-                                self.data_meas,
-                                time_stamp,
-                                pos_meas,
-                                quat_meas,
-                                self.estimator.data.u,
-                            )
-                        append_state(self.data_est, time_stamp, estimated_state)
-                else:
+                # AFTER publishing, we have time to store and print timings
+                if DEBUG_TIMINGS:
+                    self.perf_timings.append(perf_time)
+                    t_avg = np.mean(self.perf_timings) * 1000
+                    t_max = np.max(self.perf_timings) * 1000
+                    t_min = np.min(self.perf_timings) * 1000
                     self.get_logger().info(
-                        f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Skipping data point..."
+                        f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms, datapoints {len(self.perf_timings)}",
+                        throttle_duration_sec=2.0,
                     )
-
-                # print(f"time_stamp={time_stamp}, time_step_command={self.time_stamp_last_command}")
-                # Before finishing, we should also check how recent the control inputs were
-                dt_cmd = time_stamp - self.time_stamp_last_command
-                if dt_cmd > 1:
-                    # TODO Move this into Kalman Filter
-                    # TODO Change varQ_forces_motor based on how old the estimate is
-                    # TODO change process and input noise depending on measurement
-                    if self.input_needed:
-                        self.get_logger().warning(
-                            f"Haven't received a new command in {dt_cmd:.0f}s. Setting it to zero.",
-                            throttle_duration_sec=5.0,
+                # AFTER publishing, we have time to store the data
+                if DEBUG_SAVE_DATA:
+                    if not self.input_needed:
+                        append_measurement(
+                            self.data_meas, time_stamp, pos_meas, quat_meas, [0.0, 0.0, 0.0, 0.0]
                         )
-                        self.estimator.set_input(np.zeros(4))
-        finally:
-            self.lock.release()  # Ensure lock is released
+                    else:
+                        append_measurement(
+                            self.data_meas, time_stamp, pos_meas, quat_meas, self.estimator.data.u
+                        )
+                    append_state(self.data_est, time_stamp, estimated_state)
+            else:
+                self.get_logger().info(
+                    f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Skipping data point..."
+                )
+
+            # print(f"time_stamp={time_stamp}, time_step_command={self.time_stamp_last_command}")
+            # Before finishing, we should also check how recent the control inputs were
+            dt_cmd = time_stamp - self.time_stamp_last_command
+            if dt_cmd > 1:
+                # TODO Move this into Kalman Filter
+                # TODO Change varQ_forces_motor based on how old the estimate is
+                # TODO change process and input noise depending on measurement
+                if self.input_needed:
+                    self.get_logger().warning(
+                        f"Haven't received a new command in {dt_cmd:.0f}s. Setting it to zero.",
+                        throttle_duration_sec=5.0,
+                    )
+                    self.estimator.set_input(np.zeros(4))
 
     def update_control(self, control: Float64MultiArray):
         """TODO."""
