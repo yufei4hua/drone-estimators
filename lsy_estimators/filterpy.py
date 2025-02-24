@@ -190,8 +190,11 @@ def ukf_calculate_sigma_points(data: UKFData, settings: UKFSettings) -> NDArray[
     P = data.covariance
     # Adding some very small identity part for numerical stability
     # Note: Higher values make the system more stable for the cost of more noise!
-    P = P + xp.eye(P.shape[0]) * 1e-12
-    U = xp.linalg.cholesky((settings.SPsettings.lambda_ + settings.SPsettings.n) * P, upper=True)
+    # P = P + xp.eye(P.shape[0]) * 1e-12
+    U = xp.linalg.cholesky(
+        (settings.SPsettings.lambda_ + settings.SPsettings.n) * P + xp.eye(P.shape[0]) * 1e-12,
+        upper=True,
+    )
 
     state_array = UKFData.as_state_array(data)
     sigma_center = state_array
