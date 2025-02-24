@@ -131,15 +131,15 @@ def append_state(data: defaultdict[str, list], time: float, state: UKFData):
     if state.forces_motor is not None:
         data["forces_motor"].append(state.forces_motor)
     else:
-        data["forces_motor"] = None
-    if state.forces_motor is not None:
+        data["forces_motor"] = []
+    if state.forces_dist is not None:
         data["forces_dist"].append(state.forces_dist)
     else:
-        data["forces_dist"] = None
-    if state.forces_motor is not None:
+        data["forces_dist"] = []
+    if state.forces_dist is not None:
         data["torques_dist"].append(state.torques_dist)
     else:
-        data["torques_dist"] = None
+        data["torques_dist"] = []
 
 
 def append_measurement(

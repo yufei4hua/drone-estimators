@@ -28,9 +28,10 @@ def setaxs1(axs1, t_start, t_end):
     axs1[0, 1].set_title("Position Error x [m]")
     axs1[1, 1].set_title("Position Error y [m]")
     axs1[2, 1].set_title("Position Error z [m]")
-    axs1[0, 1].set_ylim(-0.001, 0.001)
-    axs1[1, 1].set_ylim(-0.001, 0.001)
-    axs1[2, 1].set_ylim(-0.001, 0.001)
+    err_pos = 1e-3
+    axs1[0, 1].set_ylim(-err_pos, err_pos)
+    axs1[1, 1].set_ylim(-err_pos, err_pos)
+    axs1[2, 1].set_ylim(-err_pos, err_pos)
     axs1[0, 2].set_title("Velocity x [m/s]")
     axs1[1, 2].set_title("Velocity y [m/s]")
     axs1[2, 2].set_title("Velocity z [m/s]")
@@ -40,9 +41,10 @@ def setaxs1(axs1, t_start, t_end):
     axs1[0, 3].set_title("Velocity Error x [m/s]")
     axs1[1, 3].set_title("Velocity Error y [m/s]")
     axs1[2, 3].set_title("Velocity Error z [m/s]")
-    axs1[0, 3].set_ylim(-0.15, 0.15)
-    axs1[1, 3].set_ylim(-0.15, 0.15)
-    axs1[2, 3].set_ylim(-0.15, 0.15)
+    err_vel = 1.5e-1
+    axs1[0, 3].set_ylim(-err_vel, err_vel)
+    axs1[1, 3].set_ylim(-err_vel, err_vel)
+    axs1[2, 3].set_ylim(-err_vel, err_vel)
 
     # Setting legend and grid
     for ax in axs1.flat:
@@ -61,9 +63,10 @@ def setaxs2(axs2, t_start, t_end):
     axs2[0, 1].set_title("Euler Angle Error roll [degree]")
     axs2[1, 1].set_title("Euler Angle Error pitch [degree]")
     axs2[2, 1].set_title("Euler Angle Error yaw [degree]")
-    axs2[0, 1].set_ylim(-0.1, 0.1)
-    axs2[0, 1].set_ylim(-0.1, 0.1)
-    axs2[2, 1].set_ylim(-0.1, 0.1)
+    err_rpy = 1e-0
+    axs2[0, 1].set_ylim(-err_rpy, err_rpy)
+    axs2[1, 1].set_ylim(-err_rpy, err_rpy)
+    axs2[2, 1].set_ylim(-err_rpy, err_rpy)
     axs2[0, 2].set_title("Angular velocity x [rad/s]")
     axs2[1, 2].set_title("Angular velocity y [rad/s]")
     axs2[2, 2].set_title("Angular velocity z [rad/s]")
@@ -73,11 +76,38 @@ def setaxs2(axs2, t_start, t_end):
     axs2[0, 3].set_title("Angular velocity error x [rad/s]")
     axs2[1, 3].set_title("Angular velocity error y [rad/s]")
     axs2[2, 3].set_title("Angular velocity error z[rad/s]")
-    axs2[0, 3].set_ylim(-0.5, 0.5)
-    axs2[1, 3].set_ylim(-0.5, 0.5)
-    axs2[2, 3].set_ylim(-0.5, 0.5)
+    err_angvel = 5e-1
+    axs2[0, 3].set_ylim(-err_angvel, err_angvel)
+    axs2[1, 3].set_ylim(-err_angvel, err_angvel)
+    axs2[2, 3].set_ylim(-err_angvel, err_angvel)
 
     for ax in axs2.flat:
+        ax.legend()
+        ax.grid()
+        ax.set_xlim(t_start, t_end)
+
+
+def setaxs3(axs3, t_start, t_end):
+    axs3[0, 0].set_title("Disturbance Force x [N]")
+    axs3[1, 0].set_title("Disturbance Force y [N]")
+    axs3[2, 0].set_title("Disturbance Force z [N]")
+    axs3[0, 0].set_ylim(-0.1, 0.1)
+    axs3[1, 0].set_ylim(-0.1, 0.1)
+    axs3[2, 0].set_ylim(-0.1, 0.1)
+    axs3[0, 1].set_title("Force Error [N]")
+    axs3[1, 1].set_title("Force Error [N]")
+    axs3[2, 1].set_title("Force Error [N]")
+    axs3[0, 1].set_title("Disturbance Torque x [Nm]")
+    axs3[1, 1].set_title("Disturbance Torque y [Nm]")
+    axs3[2, 1].set_title("Disturbance Torque z [Nm]")
+    axs3[0, 1].set_ylim(-0.002, 0.002)
+    axs3[1, 1].set_ylim(-0.002, 0.002)
+    axs3[2, 1].set_ylim(-0.002, 0.002)
+    axs3[0, 3].set_title("Torque Error [Nm]")
+    axs3[1, 3].set_title("Torque Error [Nm]")
+    axs3[2, 3].set_title("Torque Error [Nm]")
+
+    for ax in axs3.flat:
         ax.legend()
         ax.grid()
         ax.set_xlim(t_start, t_end)
@@ -129,9 +159,10 @@ def plotaxs1(
     #     color="tab:orange",
     # )  # plotting 3 std
 
-    # axs1[0, 1].plot(data["time_est"], data["pos_error"][:, 0], label="x")
-    # axs1[1, 1].plot(data["time_est"], data["pos_error"][:, 1], label="y")
-    # axs1[2, 1].plot(data["time_est"], data["pos_error"][:, 2], label="z")
+    if len(data["pos_error"]) > 0:
+        axs1[0, 1].plot(data["time"], data["pos_error"][:, 0], label=label, color=color)
+        axs1[1, 1].plot(data["time"], data["pos_error"][:, 1], label=label, color=color)
+        axs1[2, 1].plot(data["time"], data["pos_error"][:, 2], label=label, color=color)
 
     axs1[0, 2].plot(data["time"], data["vel"][:, 0], linestyle, label=label, color=color)
 
@@ -166,9 +197,10 @@ def plotaxs1(
     #     color="tab:orange",
     # )  # plotting 3 std
 
-    # axs1[0, 3].plot(data["time_est"], data["vel_error"][:, 0], label="vx")
-    # axs1[1, 3].plot(data["time_est"], data["vel_error"][:, 1], label="vy")
-    # axs1[2, 3].plot(data["time_est"], data["vel_error"][:, 2], label="vz")
+    if len(data["vel_error"]) > 0:
+        axs1[0, 3].plot(data["time"], data["vel_error"][:, 0], label=label, color=color)
+        axs1[1, 3].plot(data["time"], data["vel_error"][:, 1], label=label, color=color)
+        axs1[2, 3].plot(data["time"], data["vel_error"][:, 2], label=label, color=color)
 
 
 def plotaxs2(
@@ -216,9 +248,10 @@ def plotaxs2(
     #     color="tab:orange",
     # )  # plotting 3 std
 
-    # axs2[0, 1].plot(data["time_est"], data["euler_error"][:, 0], label="roll")
-    # axs2[1, 1].plot(data["time_est"], data["euler_error"][:, 1], label="pitch")
-    # axs2[2, 1].plot(data["time_est"], data["euler_error"][:, 2], label="yaw")
+    if len(data["rpy_error"]) > 0:
+        axs2[0, 1].plot(data["time"], data["rpy_error"][:, 0], label=label, color=color)
+        axs2[1, 1].plot(data["time"], data["rpy_error"][:, 1], label=label, color=color)
+        axs2[2, 1].plot(data["time"], data["rpy_error"][:, 2], label=label, color=color)
 
     axs2[0, 2].plot(data["time"], data["angvel"][:, 0], linestyle, label=label, color=color)
     # axs2[0, 2].fill_between(
@@ -250,136 +283,119 @@ def plotaxs2(
     #     color="tab:orange",
     # )  # plotting 3 std
 
-    # axs2[0, 3].plot(data["time"], data["euler_rate_error"][:, 0], label="roll rate")
-    # axs2[1, 3].plot(data["time"], data["euler_rate_error"][:, 1], label="pitch rate")
-    # axs2[2, 3].plot(data["time"], data["euler_rate_error"][:, 1], label="yaw rate")
+    if len(data["angvel_error"]) > 0:
+        axs2[0, 3].plot(data["time"], data["angvel_error"][:, 0], label=label, color=color)
+        axs2[1, 3].plot(data["time"], data["angvel_error"][:, 1], label=label, color=color)
+        axs2[2, 3].plot(data["time"], data["angvel_error"][:, 1], label=label, color=color)
 
 
-def plotaxs3(axs3, alpha, data, t_vertical=None, order="", weight=0, t_start=0, t_end=10):
+def plotaxs3(
+    axs3,
+    data,
+    label="unkown",
+    linestyle="-",
+    color="tab:blue",
+    alpha=0.0,
+    t_vertical=None,
+    order="",
+    weight=0,
+    t_start=0,
+    t_end=10,
+):
     ### force and torque
-    if data["P_post"].shape[1] >= 15:  # check if the posterior even contains the force
-        axs3[0, 0].set_title("Disturbance Force x [N]")
-        axs3[0, 0].plot(data["time_est"], data["force_est"][:, 0], label="UKF")
-        # axs3[0, 0].plot(data["time_est"], data["force_est_fxtdo"][:, 0], label='FxTDO')
-        axs3[0, 0].fill_between(
-            data["time_est"],
-            -3 * data["P_post"][:, 12] + data["force_est"][:, 0],
-            3 * data["P_post"][:, 12] + data["force_est"][:, 0],
-            alpha=alpha,
-            linewidth=0,
-        )  # plotting 3 std
-        try:
-            axs3[0, 0].vlines(
-                x=[t_vertical[order.index("x")], t_vertical[order.index("x") + 1]],
-                ymin=-0.1,
-                ymax=0.1,
-                colors="red",
-                linestyles="--",
-            )
-        except:
-            ...  # We do not care if the index cant be found. Simply dont plot
-        axs3[0, 0].set_ylim(-0.1, 0.1)
+    if len(data["forces_dist"]) > 0:  # check if the posterior even contains the force
+        axs3[0, 0].plot(data["time"], data["forces_dist"][:, 0], label=label, color=color)
+        # axs3[0, 0].fill_between(
+        #     data["time"],
+        #     -3 * data["P_post"][:, 12] + data["force_est"][:, 0],
+        #     3 * data["P_post"][:, 12] + data["force_est"][:, 0],
+        #     alpha=alpha,
+        #     linewidth=0,
+        # )  # plotting 3 std
+        # try:
+        #     axs3[0, 0].vlines(
+        #         x=[t_vertical[order.index("x")], t_vertical[order.index("x") + 1]],
+        #         ymin=-0.1,
+        #         ymax=0.1,
+        #         colors="red",
+        #         linestyles="--",
+        #     )
+        # except:
+        #     ...  # We do not care if the index cant be found. Simply dont plot
 
-        axs3[1, 0].set_title("Disturbance Force y [N]")
-        axs3[1, 0].plot(data["time_est"], data["force_est"][:, 1], label="UKF")
-        # axs3[1, 0].plot(data["time_est"], data["force_est_fxtdo"][:, 1], label='FxTDO')
-        axs3[1, 0].fill_between(
-            data["time_est"],
-            -3 * data["P_post"][:, 13] + data["force_est"][:, 1],
-            3 * data["P_post"][:, 13] + data["force_est"][:, 1],
-            alpha=alpha,
-            linewidth=0,
-        )  # plotting 3 std
-        try:
-            axs3[1, 0].vlines(
-                x=[t_vertical[order.index("y")], t_vertical[order.index("y") + 1]],
-                ymin=-0.1,
-                ymax=0.1,
-                colors="red",
-                linestyles="--",
-            )
-        except:
-            ...  # We do not care if the index cant be found. Simply dont plot
-        axs3[1, 0].set_ylim(-0.1, 0.1)
+        axs3[1, 0].plot(data["time"], data["forces_dist"][:, 1], label=label, color=color)
+        # axs3[1, 0].fill_between(
+        #     data["time"],
+        #     -3 * data["P_post"][:, 13] + data["force_est"][:, 1],
+        #     3 * data["P_post"][:, 13] + data["force_est"][:, 1],
+        #     alpha=alpha,
+        #     linewidth=0,
+        # )  # plotting 3 std
+        # try:
+        #     axs3[1, 0].vlines(
+        #         x=[t_vertical[order.index("y")], t_vertical[order.index("y") + 1]],
+        #         ymin=-0.1,
+        #         ymax=0.1,
+        #         colors="red",
+        #         linestyles="--",
+        #     )
+        # except:
+        #     ...  # We do not care if the index cant be found. Simply dont plot
 
-        axs3[2, 0].set_title("Disturbance Force z [N]")
-        axs3[2, 0].plot(data["time_est"], data["force_est"][:, 2], label="UKF")
-        # axs3[2, 0].plot(data["time_est"], data["force_est_fxtdo"][:, 2], label='FxTDO')
-        axs3[2, 0].fill_between(
-            data["time_est"],
-            -3 * data["P_post"][:, 14] + data["force_est"][:, 2],
-            3 * data["P_post"][:, 14] + data["force_est"][:, 2],
-            alpha=alpha,
-            linewidth=0,
-        )  # plotting 3 std
-        try:
-            axs3[2, 0].vlines(
-                x=[t_vertical[order.index("z")], t_vertical[order.index("z") + 1]],
-                ymin=-0.1,
-                ymax=0.1,
-                colors="red",
-                linestyles="--",
-            )
-        except:
-            ...  # We do not care if the index cant be found. Simply dont plot
-        if weight > 0.0:
-            axs3[2, 0].hlines(
-                y=-weight / 1000 * 9.81,
-                xmin=t_start,
-                xmax=t_start + 60,
-                colors="green",
-                linestyles="--",
-            )
-        axs3[2, 0].set_ylim(-0.1, 0.1)
+        axs3[2, 0].plot(data["time"], data["forces_dist"][:, 2], label=label, color=color)
+        # axs3[2, 0].fill_between(
+        #     data["time"],
+        #     -3 * data["P_post"][:, 14] + data["force_est"][:, 2],
+        #     3 * data["P_post"][:, 14] + data["force_est"][:, 2],
+        #     alpha=alpha,
+        #     linewidth=0,
+        # )  # plotting 3 std
+        # try:
+        #     axs3[2, 0].vlines(
+        #         x=[t_vertical[order.index("z")], t_vertical[order.index("z") + 1]],
+        #         ymin=-0.1,
+        #         ymax=0.1,
+        #         colors="red",
+        #         linestyles="--",
+        #     )
+        # except:
+        #     ...  # We do not care if the index cant be found. Simply dont plot
+        # if weight > 0.0:
+        #     axs3[2, 0].hlines(
+        #         y=-weight / 1000 * 9.81,
+        #         xmin=t_start,
+        #         xmax=t_start + 60,
+        #         colors="green",
+        #         linestyles="--",
+        #     )
 
-        # axs3[0, 1].set_title('Force Error [N]')
-        # axs3[1, 1].set_title('Force Error [N]')
-        # axs3[2, 1].set_title('Force Error [N]')
-        # TODO
+    if len(data["torques_dist"]) > 0:  # check if the posterior even contains the torque
+        axs3[0, 1].plot(data["time"], data["torques_dist"][:, 0], label=label, color=color)
+        # axs3[0, 1].fill_between(
+        #     data["time"],
+        #     -3 * data["P_post"][:, 15] + data["torque_est"][:, 0],
+        #     3 * data["P_post"][:, 15] + data["torque_est"][:, 0],
+        #     alpha=alpha,
+        #     linewidth=1,
+        # )  # plotting 3 std
 
-    if data["P_post"].shape[1] >= 18:  # check if the posterior even contains the torque
-        axs3[0, 1].set_title("Disturbance Torque x [Nm]")
-        axs3[0, 1].plot(data["time_est"], data["torque_est"][:, 0], label="est")
-        axs3[0, 1].fill_between(
-            data["time_est"],
-            -3 * data["P_post"][:, 15] + data["torque_est"][:, 0],
-            3 * data["P_post"][:, 15] + data["torque_est"][:, 0],
-            alpha=alpha,
-            linewidth=1,
-        )  # plotting 3 std
-        axs3[0, 1].set_ylim(-0.002, 0.002)
+        axs3[1, 1].plot(data["time"], data["torques_dist"][:, 1], label=label, color=color)
+        # axs3[1, 1].fill_between(
+        #     data["time"],
+        #     -3 * data["P_post"][:, 16] + data["torque_est"][:, 1],
+        #     3 * data["P_post"][:, 16] + data["torque_est"][:, 1],
+        #     alpha=alpha,
+        #     linewidth=1,
+        # )  # plotting 3 std
 
-        axs3[1, 1].set_title("Disturbance Torque y [Nm]")
-        axs3[1, 1].plot(data["time_est"], data["torque_est"][:, 1], label="est")
-        axs3[1, 1].fill_between(
-            data["time_est"],
-            -3 * data["P_post"][:, 16] + data["torque_est"][:, 1],
-            3 * data["P_post"][:, 16] + data["torque_est"][:, 1],
-            alpha=alpha,
-            linewidth=1,
-        )  # plotting 3 std
-        axs3[1, 1].set_ylim(-0.002, 0.002)
-
-        axs3[2, 1].set_title("Disturbance Torque z [Nm]")
-        axs3[2, 1].plot(data["time_est"], data["torque_est"][:, 2], label="est")
-        axs3[2, 1].fill_between(
-            data["time_est"],
-            -3 * data["P_post"][:, 17] + data["torque_est"][:, 2],
-            3 * data["P_post"][:, 17] + data["torque_est"][:, 2],
-            alpha=alpha,
-            linewidth=1,
-        )  # plotting 3 std
-        axs3[2, 1].set_ylim(-0.002, 0.002)
-
-        # axs3[0, 3].set_title('Torque Error [Nm]')
-        # axs3[1, 3].set_title('Torque Error [Nm]')
-        # axs3[2, 3].set_title('Torque Error [Nm]')
-        # TODO
-
-    for ax in axs3.flat:
-        ax.legend()
-        ax.grid()
-        ax.set_xlim(t_start, t_end)
+        axs3[2, 1].plot(data["time"], data["torques_dist"][:, 2], label=label, color=color)
+        # axs3[2, 1].fill_between(
+        #     data["time"],
+        #     -3 * data["P_post"][:, 17] + data["torque_est"][:, 2],
+        #     3 * data["P_post"][:, 17] + data["torque_est"][:, 2],
+        #     alpha=alpha,
+        #     linewidth=1,
+        # )  # plotting 3 std
 
 
 def plotaxs3single(axs3, alpha, data, t_vertical=None, order="", weight=0, t_start=0, t_end=10):
@@ -457,7 +473,7 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     fig3, axs3 = plt.subplots(3, 4, figsize=figsize)  # force and torque
     # fig3, axs3 = plt.subplots(3, 2, figsize=figsize) # force and torque
     # fig3, axs3 = plt.subplots(1, figsize=figsize)  # force and torque
-    # fig3.tight_layout(pad=pad)
+    fig3.tight_layout(pad=pad)
 
     # axs3.tick_params(axis="both", which="major", labelsize=12)
     # axs3.tick_params(axis="both", which="minor", labelsize=10)
@@ -480,7 +496,6 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     # Calculating measured vel and angvel from finite differences
     filter_length, filter_order = 51, 1  # length/200Hz = length in [s]
     dt_avg = np.mean(np.diff(data_meas["time"]))
-    print(f"dt_avg={dt_avg}")
 
     # pos_meas_filtered = savgol_filter(data_meas["pos"], filter_length, filter_order, axis=0)
     # data_meas["pos"] = pos_meas_filtered  # TODO remove?
@@ -497,6 +512,10 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     data_meas["angvel"] = rpy_dot / 180 * np.pi
     # data_meas["angvel"] = rot.apply(rpy_dot / 180 * np.pi)
 
+    # data_meas["angvel"] = quat2angvel(quat_meas_filtered, data_meas["time"])
+
+    # estimator_datasets[0]["angvel"]
+
     # dquat = np.gradient(quat_meas_filtered, data_meas["time"], axis=0)
     # dquat_filtered = savgol_filter(data_meas["quat"], 7, 2, deriv=1, delta=dt_avg, axis=0)
     # data_meas["angvel"] = dquat2angvel(
@@ -505,6 +524,31 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     # data_meas["angvel"] = savgol_filter(data_meas["angvel"], 7, 2, deriv=1, delta=dt_avg, axis=0)
 
     # Interpolating maybe? TODO
+
+    # Error calculation of estimates to "ground truth" (=filtered measurements)
+    for i in range(len(estimator_types)):
+        data_est = estimator_datasets[i]
+        estimator_times = data_est["time"]
+        measurement_times = data_meas["time"]
+        data_new = {}
+        for k, v in data_est.items():
+            if k != "time" and k != "forces_dist" and k != "torques_dist" and k != "forces_motor":
+                # interpolate measurement to fit estimator data
+                interpolation = interp1d(
+                    measurement_times, data_meas[k], kind="linear", axis=0, fill_value="extrapolate"
+                )
+                # values2_interp = interp_func(time1)
+                # interpolation = np.interp(estimator_times, measurement_times, data_meas[k], )
+                data_new[f"{k}_error"] = interpolation(estimator_times) - v
+        for k, v in data_new.items():
+            data_est[k] = v
+
+        pos = rmse(data_est["pos_error"])
+        quat = rmse(data_est["quat_error"])
+        vel = rmse(data_est["vel_error"])
+        angvel = rmse(data_est["angvel_error"])
+        print(f"{estimator_types[i]} RMSE: pos={pos}, quat={quat}, vel={vel}, angvel={angvel}")
+        # print(f"estimator {estimator_types[i]} keys={data_est.keys()}")
 
     # Skipping datapoints for faster plotting performance
     # Note: This decreases high frequency effects
@@ -525,10 +569,12 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
 
         plotaxs1(axs1, data, label=name, linestyle="-", color=colors[i + 1])
         plotaxs2(axs2, data, label=name, linestyle="-", color=colors[i + 1])
+        plotaxs3(axs3, data, label=name, linestyle="-", color=colors[i + 1])
 
     # TODO axis title, grid, legend etc
     setaxs1(axs1, data_meas["time"][0], data_meas["time"][-1])
     setaxs2(axs2, data_meas["time"][0], data_meas["time"][-1])
+    setaxs3(axs3, data_meas["time"][0], data_meas["time"][-1])
 
     # plotaxs1(axs1, alpha, data, t_vertical=None, order="", weight=0, t_start=0, t_end=50)
     # plotaxs2(axs2, alpha, data, t_vertical=None, order="", weight=0, t_start=0, t_end=50)
@@ -604,6 +650,43 @@ def quat2rpy(data: dict[str, NDArray]) -> dict[str, NDArray]:
     return data
 
 
+def quat2axis_angle(q1, q2):
+    """Computes the angle and axis of rotation between two quaternions.
+
+    Parameters:
+        q1 (array-like): First quaternion [x, y, z, w]
+        q2 (array-like): Second quaternion [x, y, z, w]
+
+    Returns:
+        tuple: (angle in radians, rotation axis as a unit vector)
+    """
+    # Compute the relative quaternion (q_delta)
+    q_delta = R.from_quat(q2) * R.from_quat(q1).inv()
+
+    # Extract the rotation angle and axis
+    angle = 2 * np.arccos(q_delta.as_quat()[..., -1])
+    axis = q_delta.as_rotvec()
+    axis_norm = np.linalg.norm(axis)
+    if axis_norm > 1e-6:
+        axis = axis / axis_norm
+    else:
+        axis = np.array([1, 0, 0])  # Default axis if too small
+
+    return angle, axis
+
+
+def quat2angvel(quat, times):
+    """Computes the angular velocity in 3D given a quaternion time series."""  #
+    q1 = quat
+    q2 = np.roll(quat, 1, axis=0)
+    dt = np.diff(times, prepend=1 / 200)
+    print(np.mean(dt))
+    angle, axis = quat2axis_angle(q1, q2)
+    print(angle)
+    angvel = (angle / dt)[..., None] * axis
+    return angvel
+
+
 def dquat2angvel(quat, dquat, dt):
     # see https://ahrs.readthedocs.io/en/latest/filters/angular.html
     # Get both rotations and their difference
@@ -620,13 +703,19 @@ def dquat2angvel(quat, dquat, dt):
 
     angvel = (angle / dt)[..., None] * axis
 
-    # return angvel
-    return R.from_quat(quat).apply(angvel)  # RPY rates
+    return angvel
+    # return R.from_quat(quat).apply(angvel)  # RPY rates
+
+
+def rmse(error_array):
+    """Calculated the RMSE of a time series error."""
+    error_value = np.sum(error_array, axis=-1)
+    return np.sqrt(np.mean(error_value**2))
 
 
 if __name__ == "__main__":
     drone_name = "cf6"
-    estimator_types = ["legacy"]  # , "ukf_fitted_DI_rpy", "ukf_mellinger_rpyt"
+    estimator_types = ["legacy", "ukf_fitted_DI_rpy"]  # , "ukf_mellinger_rpyt"
     estimator_datasets = []
 
     path = os.path.dirname(os.path.abspath(__file__))
