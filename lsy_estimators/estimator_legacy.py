@@ -28,9 +28,6 @@ class StateEstimator(object):
     """
 
     def __init__(self, filter_parameters):
-        """Initializaiton."""
-        super(StateEstimator, self).__init__()
-
         # Lock for access to state
         # Makes sure the service does not conflict with normal updates
         self.state_access_lock = Lock()
@@ -99,6 +96,10 @@ class StateEstimator(object):
         )
 
     def set_input(self, command):
+        """This function is not part of the legacy estimator and only for compatability."""
+        pass
+
+    def set_state(self, pos, quat):
         """This function is not part of the legacy estimator and only for compatability."""
         pass
 

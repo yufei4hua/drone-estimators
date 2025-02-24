@@ -112,20 +112,20 @@ class KalmanFilter(Estimator):
         dim_x = UKFData.get_state_dim(self.data)
         # print(f"dim_x={dim_x}")
 
-        # Q, R = self.create_covariance_matrices(
-        #     dim_x=dim_x,
-        #     dim_z=dim_z,
-        #     varQ_pos=1e-5,
-        #     varQ_quat=1e-4,
-        #     varQ_forces_motor=1e-1,
-        #     varR_pos=1e-8,
-        #     varR_quat=3e-6,
-        #     dt=dt,
-        # )
-        Q = self.create_Q(
-            dim_x=dim_x, varQ_pos=1e-6, varQ_quat=1e-6, varQ_vel=1e-3, varQ_angvel=1e-2, dt=dt
+        Q, R = self.create_covariance_matrices(
+            dim_x=dim_x,
+            dim_z=dim_z,
+            varQ_pos=1e-4,
+            varQ_quat=1e-4,
+            varQ_forces_motor=1e-1,
+            varR_pos=1e-8,
+            varR_quat=5e-8,
+            dt=dt,
         )
-        R = self.create_R(dim_z=dim_z, varR_pos=1e-8, varR_quat=3e-6, dt=dt)
+        # Q = self.create_Q(
+        #     dim_x=dim_x, varQ_pos=1e-6, varQ_quat=1e-6, varQ_vel=1e-3, varQ_angvel=1e-2, dt=dt
+        # )
+        # R = self.create_R(dim_z=dim_z, varR_pos=1e-8, varR_quat=3e-6, dt=dt)
 
         sigma_settings = SigmaPointsSettings.create(n=dim_x, alpha=1e-3, beta=2.0, kappa=0.0)
         self.settings = UKFSettings.create(
@@ -134,9 +134,16 @@ class KalmanFilter(Estimator):
 
         # Initialize state and covariance
         if initial_obs is not None:
-            self.data = self.data.replace(pos=initial_obs["pos"], quat=initial_obs["quat"])
-            # How certain are we initially? Basically 100% if we have data
-            self.data = self.data.replace(covariance=np.eye(dim_x) * 1e-6)
+            self.set_state(initial_obs["pos"], initial_obs["quat"])
+
+    def set_state(self, pos: Array, quat: Array):
+        """Sets pos and quat of the state to the given values and reduces the covariance value.
+
+        With aggressive Q and R values, this needs to be called in the beginning. Otherwise the estimator might fail.
+        """
+        self.data = self.data.replace(pos=pos, quat=quat)
+        dim_x = UKFData.as_state_array(self.data).shape[0]
+        self.data = self.data.replace(covariance=np.eye(dim_x) * 1e-6)
 
     def create_covariance_matrices(
         self,

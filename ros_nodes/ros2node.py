@@ -66,6 +66,7 @@ class EstimatorNode(Node):
         super().__init__(f"Estimator_{settings.drone_name}")
         self.lock = threading.Lock()
         self.input_needed = False
+        self.initial_observation = None
         self.settings = settings
         sec, _ = self.get_clock().now().seconds_nanoseconds()
         self.time_stamp_last_measurement = sec
@@ -147,6 +148,10 @@ class EstimatorNode(Node):
                 time_stamp = header2sec(header)
                 dt = time_stamp - self.time_stamp_last_measurement
 
+                if self.initial_observation is None:
+                    self.initial_observation = (pos_meas, quat_meas)
+                    self.estimator.set_state(pos_meas, quat_meas)
+
                 # self.get_logger().info(
                 #     f"New Measurement for {self.settings.drone_name}: time={time_stamp}, pos_meas={pos_meas}, quat_meas={quat_meas}"
                 # )
@@ -172,7 +177,7 @@ class EstimatorNode(Node):
                         t_max = np.max(self.perf_timings) * 1000
                         t_min = np.min(self.perf_timings) * 1000
                         self.get_logger().info(
-                            f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms",
+                            f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms, datapoints {len(self.perf_timings)}",
                             throttle_duration_sec=2.0,
                         )
                     self.publish_state(header, estimated_state)
