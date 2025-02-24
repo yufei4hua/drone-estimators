@@ -26,6 +26,7 @@ import toml
 from geometry_msgs.msg import PoseStamped, TwistStamped, WrenchStamped
 from munch import Munch, munchify
 from rclpy.node import Node
+from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Float64MultiArray
 from tf2_msgs.msg import TFMessage
 
@@ -104,24 +105,38 @@ class EstimatorNode(Node):
         # A better implementation would be:
         # https://docs.ros.org/en/foxy/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
         # But for now this works and we don't care about a fixed publishing frequency
-        self.subscriber_frames = self.create_subscription(TFMessage, "/tf", self.estimate_state, 1)
-
-        self.subscriber_control = self.create_subscription(
-            Float64MultiArray, f"/command_{self.settings.drone_name}", self.update_control, 1
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=2,
+        )
+        self.subscriber_frames = self.create_subscription(
+            TFMessage, "/tf", self.estimate_state, qos_profile
         )
 
+        self.subscriber_control = self.create_subscription(
+            Float64MultiArray,
+            f"/command_{self.settings.drone_name}",
+            self.update_control,
+            qos_profile,
+        )
+
+        # pos, quat
         self.publisher_pose = self.create_publisher(
-            PoseStamped, f"/estimated_state_pose_{self.settings.drone_name}", 1
-        )  # pos, quat
+            PoseStamped, f"/estimated_state_pose_{self.settings.drone_name}", qos_profile
+        )
+        # vel, angvel
         self.publisher_twist = self.create_publisher(
-            TwistStamped, f"/estimated_state_twist_{self.settings.drone_name}", 1
-        )  # vel, angvel
+            TwistStamped, f"/estimated_state_twist_{self.settings.drone_name}", qos_profile
+        )
+        # f_motors
         self.publisher_forces = self.create_publisher(
-            Float64MultiArray, f"/estimated_state_forces_{self.settings.drone_name}", 1
-        )  # f_motors
+            Float64MultiArray, f"/estimated_state_forces_{self.settings.drone_name}", qos_profile
+        )
+        # f_dis, t_dis
         self.publisher_wrench = self.create_publisher(
-            WrenchStamped, f"/estimated_state_wrench_{self.settings.drone_name}", 1
-        )  # f_dis, t_dis
+            WrenchStamped, f"/estimated_state_wrench_{self.settings.drone_name}", qos_profile
+        )
 
         self.get_logger().info(f"Started estimator (process {os.getpid()})")
 
@@ -161,10 +176,10 @@ class EstimatorNode(Node):
                 t2 = time.perf_counter()
                 perf_time = t2 - t1
 
-                if perf_time > 5e-3:
+                if dt > 9e-3:
                     self.get_logger().warning(
-                        f"Prediction time >5ms ({(t2 - t1) * 1e3:2f}). New data was probably dropped.",
-                        throttle_duration_sec=0.5,
+                        f"Can't keept up... Time since last estimation: {dt * 1e3:.2f}ms.",
+                        throttle_duration_sec=0.1,
                     )
 
                 # AFTER publishing, we have time to store and print timings
