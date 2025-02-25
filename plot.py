@@ -494,14 +494,13 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     ### Data preprocessing
     ##################################################
     # Calculating measured vel and angvel from finite differences
-    filter_length, filter_order = 51, 1  # length/200Hz = length in [s]
     dt_avg = np.mean(np.diff(data_meas["time"]))
 
-    # pos_meas_filtered = savgol_filter(data_meas["pos"], filter_length, filter_order, axis=0)
+    data_meas["pos"] = savgol_filter(data_meas["pos"], 7, 1, axis=0)
     # data_meas["pos"] = pos_meas_filtered  # TODO remove?
     # data_meas["vel"] = np.gradient(pos_meas_filtered, data_meas["time"], axis=0)
     # data_meas["vel"] = savgol_filter(data_meas["vel"], filter_length, filter_order, axis=0)
-    data_meas["vel"] = savgol_filter(data_meas["pos"], 51, 1, deriv=1, delta=dt_avg, axis=0)
+    data_meas["vel"] = savgol_filter(data_meas["pos"], 9, 2, deriv=1, delta=dt_avg, axis=0)
 
     quat_meas_filtered = savgol_filter(data_meas["quat"], 7, 2, axis=0)
     data_meas["quat"] = quat_meas_filtered  # TODO remove?
