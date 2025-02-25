@@ -115,10 +115,10 @@ class KalmanFilter(Estimator):
         Q, R = self.create_covariance_matrices(
             dim_x=dim_x,
             dim_z=dim_z,
-            varQ_pos=1e-4,
+            varQ_pos=1e-8,
             varQ_quat=1e-4,
             varQ_forces_motor=1e-1,
-            varR_pos=1e-8,
+            varR_pos=1e-9,
             varR_quat=5e-8,
             dt=dt,
         )
