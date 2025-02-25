@@ -108,7 +108,7 @@ class EstimatorNode(Node):
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             history=QoSHistoryPolicy.KEEP_LAST,
-            depth=2,
+            depth=3,
         )
         self.subscriber_frames = self.create_subscription(
             TFMessage, "/tf", self.estimate_state, qos_profile
@@ -179,7 +179,7 @@ class EstimatorNode(Node):
                 if dt > 9e-3:
                     self.get_logger().warning(
                         f"Can't keept up... Time since last estimation: {dt * 1e3:.2f}ms.",
-                        throttle_duration_sec=0.1,
+                        throttle_duration_sec=0.5,
                     )
 
                 # AFTER publishing, we have time to store and print timings
