@@ -507,7 +507,7 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     data_meas = quat2rpy(data_meas)
 
     rot = R.from_euler("xyz", data_meas["rpy"], degrees=True)
-    rpy_dot = savgol_filter(data_meas["rpy"], 11, 1, deriv=1, delta=dt_avg, axis=0)
+    rpy_dot = savgol_filter(data_meas["rpy"], 7, 1, deriv=1, delta=dt_avg, axis=0)
     data_meas["angvel"] = rpy_dot / 180 * np.pi
     # data_meas["angvel"] = rot.apply(rpy_dot / 180 * np.pi)
 
