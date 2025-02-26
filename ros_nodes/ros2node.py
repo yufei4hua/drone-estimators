@@ -168,7 +168,7 @@ class EstimatorNode(Node):
                 self.get_logger().warning("dt < 0s! Assuming rosbag is played. Setting time to now")
                 self.time_stamp_last_measurement = time_stamp
                 self.time_stamp_last_command = time_stamp
-            elif dt > 1e-4:  # accepting the new data point
+            elif dt > 5e-4:  # accepting the new data point
                 self.time_stamp_last_measurement = time_stamp
                 t1 = time.perf_counter()
                 estimated_state = self.estimator.step(pos_meas, quat_meas, dt)
@@ -205,7 +205,7 @@ class EstimatorNode(Node):
                     append_state(self.data_est, time_stamp, estimated_state)
             else:
                 self.get_logger().info(
-                    f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Skipping data point..."
+                    f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Ignoring data point..."
                 )
 
             # print(f"time_stamp={time_stamp}, time_step_command={self.time_stamp_last_command}")
