@@ -93,6 +93,7 @@ class EstimatorNode(Node):
                 self.estimator = KalmanFilter(
                     dt=1.0 / 200,
                     model=settings.dynamics_model,  # mellinger_rpyt, fitted_DI_rpy
+                    config=settings.drone_config,
                     estimate_forces_motor=settings.estimate_forces_motor,
                     estimate_forces_dist=settings.estimate_forces_dist,
                     estimate_torques_dist=settings.estimate_torques_dist,

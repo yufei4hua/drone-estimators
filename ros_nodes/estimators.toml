@@ -1,7 +1,7 @@
 # Simly add your estimators as shown below
 
 # Supported types: legacy, ukf
-# Supported models: See lsy_models.models.available_models, i.e. fitted_DI_rpyt, mellinger_rpyt
+# Supported models: See lsy_models.models.available_models, i.e. fitted_DI_rpy, mellinger_rpyt
 
 [debug]
 timings = true   # print the timings of each estimator
@@ -10,8 +10,9 @@ save_data = true # store the raw data and estimates into pickle files
 [estimator1]
 estimator_type = "ukf"
 drone_name = "cf6"
-dynamics_model = "fitted_DI_rpy"
-estimate_forces_motor = false
+drone_config = "cf2x_L250"
+dynamics_model = "mellinger_rpyt"
+estimate_forces_motor = true
 estimate_forces_dist = true
 estimate_torques_dist = true
 
