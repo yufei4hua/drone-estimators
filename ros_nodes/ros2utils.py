@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from std_msgs.msg import Header
     from torch import Tensor
 
-    from lsy_estimators.datacls import UKFData
+    from lsy_estimators.structs import UKFData
 
     Array = NDArray | JaxArray | Tensor
 
@@ -127,7 +127,7 @@ def append_state(data: defaultdict[str, list], time: float, state: UKFData):
     data["pos"].append(state.pos)
     data["quat"].append(state.quat)
     data["vel"].append(state.vel)
-    data["angvel"].append(state.angvel)
+    data["ang_vel"].append(state.angvel)
     if state.forces_motor is not None:
         data["forces_motor"].append(state.forces_motor)
     else:

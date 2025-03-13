@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from lsy_models.utils import rotation as R
 
-from lsy_estimators.datacls import UKFData
+from lsy_estimators.structs import UKFData
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

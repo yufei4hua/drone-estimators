@@ -23,8 +23,8 @@ from typing import TYPE_CHECKING, Callable
 import numpy as np
 from scipy.linalg import block_diag
 
-from lsy_estimators.datacls import SigmaPointsSettings, UKFData, UKFSettings
 from lsy_estimators.integration import integrate_UKFData
+from lsy_estimators.structs import SigmaPointsSettings, UKFData, UKFSettings
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -123,32 +123,53 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     return data
 
 
-# Legacy code
-# def ukf_predict(data: UKFData, settings: UKFSettings) -> UKFData:
-#     """TODO."""
-#     # Calculate sigma points
-#     sigmas = ukf_calculate_sigma_points(data, settings)
-#     sigma_states = QuadrotorState.from_array(data.state, sigmas)
+def ukf_predict(data: UKFData, settings: UKFSettings) -> UKFData:
+    """TODO."""
+    xp = data.pos.__array_namespace__()
+    #### Predict
+    # Calculate sigma pointstf.transform.rotation.x,
+    # TODO special sigma points for quaternions!
+    sigmas = ukf_calculate_sigma_points(data, settings)
+    data_sigmas = UKFData.from_state_array(data, sigmas)
 
-#     # Pass sigma points through dynamics
-#     sigma_states_dot = settings.fx(sigma_states, data.u)
-#     sigmas_dot = QuadrotorState.as_array(sigma_states_dot)
+    # Pass sigma points through dynamics
+    pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot = settings.fx(
+        pos=data_sigmas.pos,
+        quat=data_sigmas.quat,
+        vel=data_sigmas.vel,
+        angvel=data_sigmas.angvel,
+        forces_motor=data_sigmas.forces_motor,
+        forces_dist=data_sigmas.forces_dist,
+        torques_dist=data_sigmas.torques_dist,
+        command=data.u,
+    )
+    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot)
+    # print(f"derivatives: {data_sigmas_dot.angvel}")
+    # sigmas_dot = QuadrotorState.as_array(sigma_states_dot)
 
-#     # Integrate dynamics if continuous
-#     # TODO implement proper integrator
-#     # TODO watch out for quaternion integration!
-#     sigmas_f = sigmas + sigmas_dot * data.dt
-#     data = data.replace(sigmas_f=sigmas_f)
+    # print(f"function call = {(t2 - t1) * 1000}ms, as_array = {(t3 - t2) * 1000}ms")
 
-#     # Compute prior with unscented transform
-#     x, P = ukf_unscented_transform(
-#         data.sigmas_f, settings.SPsettings.Wm, settings.SPsettings.Wc, settings.Q
-#     )
+    # Integrate dynamics if continuous
+    # TODO implement proper integrator
+    # TODO watch out for quaternion integration! (length and orientation)
+    # sigmas_f = sigmas + sigmas_dot * data.dt
+    # sigmas_f[..., 3:7] = (
+    #     sigmas_f[..., 3:7] / xp.linalg.norm(sigmas_f[..., 3:7], axis=-1)[:, None]
+    # )  # TODO jax cant do that in place
+    # data = data.replace(sigmas_f=sigmas_f)
+    data_sigmas_f = integrate_UKFData(data_sigmas, data_sigmas_dot)
+    sigmas_f = UKFData.as_state_array(data_sigmas_f)
 
-#     # save prior
-#     data = data.replace(x=x, covariance=P)
+    # Compute prior with unscented transform
+    x, P = ukf_unscented_transform(
+        sigmas_f, settings.SPsettings.Wm, settings.SPsettings.Wc, settings.Q
+    )
 
-#     return data
+    # save prior
+    data = UKFData.from_state_array(data, x)
+    data = data.replace(covariance=P)
+
+    return data
 
 
 # def ukf_correct(data: UKFData, settings: UKFSettings) -> UKFData:

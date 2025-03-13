@@ -253,7 +253,7 @@ def plotaxs2(
         axs2[1, 1].plot(data["time"], data["rpy_error"][:, 1], label=label, color=color)
         axs2[2, 1].plot(data["time"], data["rpy_error"][:, 2], label=label, color=color)
 
-    axs2[0, 2].plot(data["time"], data["angvel"][:, 0], linestyle, label=label, color=color)
+    axs2[0, 2].plot(data["time"], data["ang_vel"][:, 0], linestyle, label=label, color=color)
     # axs2[0, 2].fill_between(
     #     data["time_est"],
     #     -3 * data["P_post"][:, 9] + data["euler_rate_est"][:, 0],
@@ -263,7 +263,7 @@ def plotaxs2(
     #     color="tab:orange",
     # )  # plotting 3 std
 
-    axs2[1, 2].plot(data["time"], data["angvel"][:, 1], linestyle, label=label, color=color)
+    axs2[1, 2].plot(data["time"], data["ang_vel"][:, 1], linestyle, label=label, color=color)
     # axs2[1, 2].fill_between(
     #     data["time_est"],
     #     -3 * data["P_post"][:, 10] + data["euler_rate_est"][:, 1],
@@ -273,7 +273,7 @@ def plotaxs2(
     #     color="tab:orange",
     # )  # plotting 3 std
 
-    axs2[2, 2].plot(data["time"], data["angvel"][:, 2], linestyle, label=label, color=color)
+    axs2[2, 2].plot(data["time"], data["ang_vel"][:, 2], linestyle, label=label, color=color)
     # axs2[2, 2].fill_between(
     #     data["time"],
     #     -3 * data["P_post"][:, 11] + data["euler_rate_est"][:, 2],
@@ -283,10 +283,10 @@ def plotaxs2(
     #     color="tab:orange",
     # )  # plotting 3 std
 
-    if len(data["angvel_error"]) > 0:
-        axs2[0, 3].plot(data["time"], data["angvel_error"][:, 0], label=label, color=color)
-        axs2[1, 3].plot(data["time"], data["angvel_error"][:, 1], label=label, color=color)
-        axs2[2, 3].plot(data["time"], data["angvel_error"][:, 1], label=label, color=color)
+    if len(data["ang_vel_error"]) > 0:
+        axs2[0, 3].plot(data["time"], data["ang_vel_error"][:, 0], label=label, color=color)
+        axs2[1, 3].plot(data["time"], data["ang_vel_error"][:, 1], label=label, color=color)
+        axs2[2, 3].plot(data["time"], data["ang_vel_error"][:, 1], label=label, color=color)
 
 
 def plotaxs3(
@@ -494,33 +494,35 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     ### Data preprocessing
     ##################################################
     # Calculating measured vel and angvel from finite differences
-    dt_avg = np.mean(np.diff(data_meas["time"]))
+    # However, first check if data is from sim => vel and ang_vel are available
+    if len(data_meas["vel"]) == 0:
+        dt_avg = np.mean(np.diff(data_meas["time"]))
 
-    data_meas["pos"] = savgol_filter(data_meas["pos"], 7, 1, axis=0)
-    # data_meas["pos"] = pos_meas_filtered  # TODO remove?
-    # data_meas["vel"] = np.gradient(pos_meas_filtered, data_meas["time"], axis=0)
-    # data_meas["vel"] = savgol_filter(data_meas["vel"], filter_length, filter_order, axis=0)
-    data_meas["vel"] = savgol_filter(data_meas["pos"], 9, 2, deriv=1, delta=dt_avg, axis=0)
+        data_meas["pos"] = savgol_filter(data_meas["pos"], 7, 1, axis=0)
+        # data_meas["pos"] = pos_meas_filtered  # TODO remove?
+        # data_meas["vel"] = np.gradient(pos_meas_filtered, data_meas["time"], axis=0)
+        # data_meas["vel"] = savgol_filter(data_meas["vel"], filter_length, filter_order, axis=0)
+        data_meas["vel"] = savgol_filter(data_meas["pos"], 9, 2, deriv=1, delta=dt_avg, axis=0)
 
-    quat_meas_filtered = savgol_filter(data_meas["quat"], 7, 2, axis=0)
-    data_meas["quat"] = quat_meas_filtered  # TODO remove?
-    data_meas = quat2rpy(data_meas)
+        quat_meas_filtered = savgol_filter(data_meas["quat"], 7, 2, axis=0)
+        data_meas["quat"] = quat_meas_filtered  # TODO remove?
+        data_meas = quat2rpy(data_meas)
 
-    rot = R.from_euler("xyz", data_meas["rpy"], degrees=True)
-    rpy_dot = savgol_filter(data_meas["rpy"], 7, 1, deriv=1, delta=dt_avg, axis=0)
-    data_meas["angvel"] = rpy_dot / 180 * np.pi
-    # data_meas["angvel"] = rot.apply(rpy_dot / 180 * np.pi)
+        rot = R.from_euler("xyz", data_meas["rpy"], degrees=True)
+        rpy_dot = savgol_filter(data_meas["rpy"], 7, 1, deriv=1, delta=dt_avg, axis=0)
+        data_meas["ang_vel"] = rpy_dot / 180 * np.pi
+        # data_meas["ang_vel"] = rot.apply(rpy_dot / 180 * np.pi)
 
-    # data_meas["angvel"] = quat2angvel(quat_meas_filtered, data_meas["time"])
+    # data_meas["ang_vel"] = quat2angvel(quat_meas_filtered, data_meas["time"])
 
-    # estimator_datasets[0]["angvel"]
+    # estimator_datasets[0]["ang_vel"]
 
     # dquat = np.gradient(quat_meas_filtered, data_meas["time"], axis=0)
     # dquat_filtered = savgol_filter(data_meas["quat"], 7, 2, deriv=1, delta=dt_avg, axis=0)
-    # data_meas["angvel"] = dquat2angvel(
+    # data_meas["ang_vel"] = dquat2angvel(
     #     quat_meas_filtered, dquat_filtered, np.diff(data_meas["time"], prepend=1.0 / 200)
     # )
-    # data_meas["angvel"] = savgol_filter(data_meas["angvel"], 7, 2, deriv=1, delta=dt_avg, axis=0)
+    # data_meas["ang_vel"] = savgol_filter(data_meas["ang_vel"], 7, 2, deriv=1, delta=dt_avg, axis=0)
 
     # Interpolating maybe? TODO
 
@@ -531,8 +533,15 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
         measurement_times = data_meas["time"]
         data_new = {}
         for k, v in data_est.items():
-            if k != "time" and k != "forces_dist" and k != "torques_dist" and k != "forces_motor":
+            if (
+                k != "time"
+                and k != "forces_dist"
+                and k != "torques_dist"
+                and k != "forces_motor"
+                and k != "command"
+            ):
                 # interpolate measurement to fit estimator data
+                # print(f"Interpolating {k} of {estimator_types[i]}")
                 interpolation = interp1d(
                     measurement_times, data_meas[k], kind="linear", axis=0, fill_value="extrapolate"
                 )
@@ -545,7 +554,7 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
         pos = rmse(data_est["pos_error"])
         quat = rmse(data_est["quat_error"])
         vel = rmse(data_est["vel_error"])
-        angvel = rmse(data_est["angvel_error"])
+        angvel = rmse(data_est["ang_vel_error"])
         print(f"{estimator_types[i]} RMSE: pos={pos}, quat={quat}, vel={vel}, angvel={angvel}")
         # print(f"estimator {estimator_types[i]} keys={data_est.keys()}")
 
@@ -714,7 +723,12 @@ def rmse(error_array):
 
 if __name__ == "__main__":
     drone_name = "cf6"
-    estimator_types = ["legacy", "ukf_fitted_DI_rpy"]  # , "ukf_mellinger_rpyt"
+    estimator_types = [
+        # "true",
+        # "legacy",
+        "ukf_fitted_DI_rpy",
+        "ukf_mellinger_rpyt",
+    ]
     estimator_datasets = []
 
     path = os.path.dirname(os.path.abspath(__file__))

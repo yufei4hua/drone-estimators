@@ -8,12 +8,14 @@ from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 from lsy_models.models import dynamics_numeric, observation_function
+from lsy_models.utils.constants import Constants
 
 from lsy_estimators.filterpy import (
     Q_discrete_white_noise,
     SigmaPointsSettings,
     UKFData,
     UKFSettings,
+    ukf_predict,
     ukf_predict_correct,
 )
 
@@ -88,7 +90,7 @@ class KalmanFilter(Estimator):
             initial_obs: Optional, the initial observation of the environment's state. See the environment's observation space for details.
         """
         fx = dynamics_numeric(model, config)
-        fx_is_continuous = True  # TODO
+        self.constants = Constants.from_config(config)
 
         dim_x = 13
         if estimate_forces_motor:
@@ -116,7 +118,7 @@ class KalmanFilter(Estimator):
             dim_x=dim_x,
             dim_z=dim_z,
             varQ_pos=1e-8,
-            varQ_quat=1e-4,
+            varQ_quat=1e-8,
             varQ_forces_motor=1e-1,
             varR_pos=1e-9,
             varR_quat=5e-8,
@@ -291,6 +293,8 @@ class KalmanFilter(Estimator):
             self.data = self.data.replace(z=np.concat((pos, quat)), dt=np.array([dt]))
 
             # if self.data.dt > 0:  # TODO make dt check more elegant and catch all errors
+            # self.data = ukf_predict(self.data, self.settings)
+            # self.data = ukf_predict(self.data, self.settings)
             self.data = ukf_predict_correct(self.data, self.settings)
 
         return self.data

@@ -13,7 +13,7 @@ import numpy as np
 import scipy.spatial.transform.rotation as R
 import transforms3d as tf
 
-from lsy_estimators.datacls import UKFData
+from lsy_estimators.structs import UKFData
 
 # from lsy_estimators.quaternions import apply_omega_to_quat, global_to_body, omega_from_quat_quat
 

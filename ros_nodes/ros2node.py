@@ -25,10 +25,13 @@ import toml
 # Message types: https://docs.ros2.org/foxy/api/geometry_msgs/index-msg.html
 from geometry_msgs.msg import PoseStamped, TwistStamped, WrenchStamped
 from munch import Munch, munchify
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Float64MultiArray
 from tf2_msgs.msg import TFMessage
+from lsy_models.utils import cf2
 
 from lsy_estimators.estimator import KalmanFilter
 from lsy_estimators.estimator_legacy import StateEstimator
@@ -47,7 +50,7 @@ from ros_nodes.ros2utils import (
 if TYPE_CHECKING:
     from std_msgs.msg import Header
 
-    from lsy_estimators.datacls import UKFData
+    from lsy_estimators.structs import UKFData
 
 
 class EstimatorNode(Node):
@@ -73,6 +76,11 @@ class EstimatorNode(Node):
         self.time_stamp_last_command = sec
         self.perf_timings = deque(maxlen=5000)
 
+        dt = 1.0 / 200
+
+        self.current_header = None
+        self.current_state = None
+
         # This is for storing the data (DEBUG_SAVE_DATA)
         self.data_meas = defaultdict(list)  # {"time": [], "pos": [], "quat": [], "command": []}
         self.data_est = defaultdict(list)
@@ -91,7 +99,7 @@ class EstimatorNode(Node):
             case "ukf":
                 self.input_needed = True
                 self.estimator = KalmanFilter(
-                    dt=1.0 / 200,
+                    dt=dt,
                     model=settings.dynamics_model,  # mellinger_rpyt, fitted_DI_rpy
                     config=settings.drone_config,
                     estimate_forces_motor=settings.estimate_forces_motor,
@@ -109,10 +117,16 @@ class EstimatorNode(Node):
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             history=QoSHistoryPolicy.KEEP_LAST,
-            depth=3,
+            depth=1,
         )
+        cg = ReentrantCallbackGroup()
+
         self.subscriber_frames = self.create_subscription(
-            TFMessage, "/tf", self.estimate_state, qos_profile
+            TFMessage,
+            "/tf",
+            self.estimate_state,
+            qos_profile,
+            callback_group=MutuallyExclusiveCallbackGroup(),
         )
 
         self.subscriber_control = self.create_subscription(
@@ -120,29 +134,45 @@ class EstimatorNode(Node):
             f"/command_{self.settings.drone_name}",
             self.update_control,
             qos_profile,
+            callback_group=MutuallyExclusiveCallbackGroup(),
         )
 
         # pos, quat
         self.publisher_pose = self.create_publisher(
-            PoseStamped, f"/estimated_state_pose_{self.settings.drone_name}", qos_profile
+            PoseStamped,
+            f"/estimated_state_pose_{self.settings.drone_name}",
+            qos_profile,
+            callback_group=MutuallyExclusiveCallbackGroup(),
         )
         # vel, angvel
         self.publisher_twist = self.create_publisher(
-            TwistStamped, f"/estimated_state_twist_{self.settings.drone_name}", qos_profile
+            TwistStamped,
+            f"/estimated_state_twist_{self.settings.drone_name}",
+            qos_profile,
+            callback_group=MutuallyExclusiveCallbackGroup(),
         )
         # f_motors
         self.publisher_forces = self.create_publisher(
-            Float64MultiArray, f"/estimated_state_forces_{self.settings.drone_name}", qos_profile
+            Float64MultiArray,
+            f"/estimated_state_forces_{self.settings.drone_name}",
+            qos_profile,
+            callback_group=MutuallyExclusiveCallbackGroup(),
         )
         # f_dis, t_dis
         self.publisher_wrench = self.create_publisher(
-            WrenchStamped, f"/estimated_state_wrench_{self.settings.drone_name}", qos_profile
+            WrenchStamped,
+            f"/estimated_state_wrench_{self.settings.drone_name}",
+            qos_profile,
+            callback_group=MutuallyExclusiveCallbackGroup(),
         )
+
+        self.create_timer(dt, self.publish_state, callback_group=MutuallyExclusiveCallbackGroup())
 
         self.get_logger().info(f"Started estimator (process {os.getpid()})")
 
     def estimate_state(self, msg: TFMessage):
         """Estimates the full drone state based on the new measurements."""
+        t1 = time.perf_counter()
         tf = find_transform(msg.transforms, self.settings.drone_name)
         if tf is None:
             self.get_logger().warning(
@@ -171,28 +201,29 @@ class EstimatorNode(Node):
                 self.time_stamp_last_command = time_stamp
             elif dt > 5e-4:  # accepting the new data point
                 self.time_stamp_last_measurement = time_stamp
-                t1 = time.perf_counter()
-                estimated_state = self.estimator.step(pos_meas, quat_meas, dt)
-                self.publish_state(header, estimated_state)
-                t2 = time.perf_counter()
-                perf_time = t2 - t1
+                # t1 = time.perf_counter()
+                self.current_header = header
+                self.current_state = self.estimator.step(pos_meas, quat_meas, dt)
+                # self.publish_state()  # self.current_state
+                # t2 = time.perf_counter()
+                # perf_time = t2 - t1
 
-                if dt > 9e-3:
-                    self.get_logger().warning(
-                        f"Can't keept up... Time since last estimation: {dt * 1e3:.2f}ms.",
-                        throttle_duration_sec=0.5,
-                    )
+                # if dt > 9e-3:
+                #     self.get_logger().warning(
+                #         f"Can't keept up... Time since last estimation: {dt * 1e3:.2f}ms."
+                #         # throttle_duration_sec=0.5,
+                #     )
 
                 # AFTER publishing, we have time to store and print timings
-                if DEBUG_TIMINGS:
-                    self.perf_timings.append(perf_time)
-                    t_avg = np.mean(self.perf_timings) * 1000
-                    t_max = np.max(self.perf_timings) * 1000
-                    t_min = np.min(self.perf_timings) * 1000
-                    self.get_logger().info(
-                        f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms, datapoints {len(self.perf_timings)}",
-                        throttle_duration_sec=2.0,
-                    )
+                # if DEBUG_TIMINGS:
+                #     self.perf_timings.append(perf_time)
+                #     t_avg = np.mean(self.perf_timings) * 1000
+                #     t_max = np.max(self.perf_timings) * 1000
+                #     t_min = np.min(self.perf_timings) * 1000
+                #     self.get_logger().info(
+                #         f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms, datapoints {len(self.perf_timings)}",
+                #         throttle_duration_sec=2.0,
+                #     )
                 # AFTER publishing, we have time to store the data
                 if DEBUG_SAVE_DATA:
                     if not self.input_needed:
@@ -203,7 +234,7 @@ class EstimatorNode(Node):
                         append_measurement(
                             self.data_meas, time_stamp, pos_meas, quat_meas, self.estimator.data.u
                         )
-                    append_state(self.data_est, time_stamp, estimated_state)
+                    append_state(self.data_est, time_stamp, self.current_state)
             else:
                 self.get_logger().info(
                     f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Ignoring data point..."
@@ -223,6 +254,18 @@ class EstimatorNode(Node):
                     )
                     self.estimator.set_input(np.zeros(4))
 
+        t2 = time.perf_counter()
+        perf_time = t2 - t1
+        if DEBUG_TIMINGS:
+            self.perf_timings.append(perf_time)
+            t_avg = np.mean(self.perf_timings) * 1000
+            t_max = np.max(self.perf_timings) * 1000
+            t_min = np.min(self.perf_timings) * 1000
+            self.get_logger().info(
+                f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms, datapoints {len(self.perf_timings)}",
+                throttle_duration_sec=2.0,
+            )
+
     def update_control(self, control: Float64MultiArray):
         """TODO."""
         # Storing the time of the current command
@@ -238,13 +281,14 @@ class EstimatorNode(Node):
         # This is only necessary because data was published wrongly (PYTR) for the current rosbags
         rpyt = np.roll(rpyt, 1)
 
-        rpyt[..., :-1] = rpyt[..., :-1] * np.pi / 180  # to rad
+        # Thrust to N
+        rpyt[..., -1] = cf2.pwm2force(rpyt[..., -1], self.estimator.constants)
 
         # self.get_logger().info(f"set input to {rpyt}")
 
         self.estimator.set_input(rpyt)
 
-    def publish_state(self, header: Header, state: UKFData):  # TODO state type
+    def publish_state(self):  # TODO state type
         """TODO."""
         # TODO time this
 
@@ -252,6 +296,11 @@ class EstimatorNode(Node):
         # self.get_logger().info(
         #     f"Published for {self.settings.drone_name}: {state.pos}, {state.quat}, {state.vel}, {state.angvel}"
         # )
+        if self.current_header is None or self.current_state is None:
+            return
+
+        header = self.current_header
+        state = self.current_state
 
         transform = create_pose(header, self.settings.drone_name, state.pos, state.quat)
         self.publisher_pose.publish(transform)
@@ -340,17 +389,20 @@ def launch_estimators(estimators: dict):
 def launch_node(settings: Munch, stop_event: threading.Event):
     """TODO."""
     node = EstimatorNode(settings)
+    executor = SingleThreadedExecutor()  # MultiThreadedExecutor() SingleThreadedExecutor
+    executor.add_node(node)
 
     signal.signal(signal.SIGINT, node.shutdown)
 
     try:
         while rclpy.ok() and not stop_event.is_set():
-            rclpy.spin_once(node, timeout_sec=0.1)
+            rclpy.spin_once(node, timeout_sec=1e-3)
+            # executor.spin_once(timeout_sec=1e-3)
     finally:
-        pass
+        ...  # pass
 
-        # print(f"destroying node {drone}")
-        # node.destroy_node()
+    print(f"destroying node ")
+    node.destroy_node()
     time.sleep(0.5)
     rclpy.shutdown()
 
