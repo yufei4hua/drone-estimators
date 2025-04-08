@@ -305,13 +305,13 @@ def plotaxs3(
     ### force and torque
     if len(data["forces_dist"]) > 0:  # check if the posterior even contains the force
         axs3[0, 0].plot(data["time"], data["forces_dist"][:, 0], label=label, color=color)
-        # axs3[0, 0].fill_between(
-        #     data["time"],
-        #     -3 * data["P_post"][:, 12] + data["force_est"][:, 0],
-        #     3 * data["P_post"][:, 12] + data["force_est"][:, 0],
-        #     alpha=alpha,
-        #     linewidth=0,
-        # )  # plotting 3 std
+        axs3[0, 0].fill_between(
+            data["time"],
+            -3 * data["covariance"][:, 13] + data["forces_dist"][:, 0],
+            3 * data["covariance"][:, 13] + data["forces_dist"][:, 0],
+            alpha=alpha,
+            linewidth=0,
+        )  # plotting 3 std
         # try:
         #     axs3[0, 0].vlines(
         #         x=[t_vertical[order.index("x")], t_vertical[order.index("x") + 1]],
@@ -535,6 +535,7 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
         for k, v in data_est.items():
             if (
                 k != "time"
+                and k != "covariance"
                 and k != "forces_dist"
                 and k != "torques_dist"
                 and k != "forces_motor"
@@ -575,9 +576,9 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
         name = estimator_types[i]
         data = estimator_datasets[i]
 
-        plotaxs1(axs1, data, label=name, linestyle="-", color=colors[i + 1])
-        plotaxs2(axs2, data, label=name, linestyle="-", color=colors[i + 1])
-        plotaxs3(axs3, data, label=name, linestyle="-", color=colors[i + 1])
+        plotaxs1(axs1, data, label=name, linestyle="-", color=colors[i + 1], alpha=alpha)
+        plotaxs2(axs2, data, label=name, linestyle="-", color=colors[i + 1], alpha=alpha)
+        plotaxs3(axs3, data, label=name, linestyle="-", color=colors[i + 1], alpha=alpha)
 
     # TODO axis title, grid, legend etc
     setaxs1(axs1, data_meas["time"][0], data_meas["time"][-1])
@@ -651,6 +652,12 @@ def list2array(data: dict[str, list]) -> dict[str, NDArray]:
         data[k] = np.array(data[k])
     return data
 
+def cov2array(data: dict[str, list]) -> dict[str, NDArray]:
+    """TODO."""
+    if len(data["covariance"]) > 0:
+        data["covariance"] = np.diagonal(data["covariance"], axis1=-2, axis2=-1)
+    return data
+
 
 def quat2rpy(data: dict[str, NDArray]) -> dict[str, NDArray]:
     """Converts the orientation in the data to euler angles."""
@@ -722,12 +729,12 @@ def rmse(error_array):
 
 
 if __name__ == "__main__":
-    drone_name = "cf6"
+    drone_name = "cf52"
     estimator_types = [
         # "true",
-        # "legacy",
+        "legacy",
         "ukf_fitted_DI_rpy",
-        "ukf_mellinger_rpyt",
+        # "ukf_mellinger_rpyt",
     ]
     estimator_datasets = []
 
@@ -746,6 +753,7 @@ if __name__ == "__main__":
             data_est = pickle.load(f)
             data_est = list2array(data_est)
             data_est = quat2rpy(data_est)
+            data_est = cov2array(data_est)
             data_est["time"] -= start_time
             estimator_datasets.append(data_est)
 

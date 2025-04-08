@@ -128,6 +128,7 @@ def append_state(data: defaultdict[str, list], time: float, state: UKFData):
     data["quat"].append(state.quat)
     data["vel"].append(state.vel)
     data["ang_vel"].append(state.angvel)
+    data["covariance"].append(state.covariance)
     if state.forces_motor is not None:
         data["forces_motor"].append(state.forces_motor)
     else:
