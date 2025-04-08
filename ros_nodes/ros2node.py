@@ -277,12 +277,10 @@ class EstimatorNode(Node):
         # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
         rpyt = np.array(control.data)
 
-        # WARNING: Remove the following lines later.
-        # This is only necessary because data was published wrongly (PYTR) for the current rosbags
-        rpyt = np.roll(rpyt, 1)
-
         # Thrust to N
         rpyt[..., -1] = cf2.pwm2force(rpyt[..., -1], self.estimator.constants)
+        # Angle to rad
+        rpyt[..., :-1] *= np.pi/180
 
         # self.get_logger().info(f"set input to {rpyt}")
 
