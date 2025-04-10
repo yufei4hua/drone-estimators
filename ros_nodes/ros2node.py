@@ -12,7 +12,7 @@ import multiprocessing as mp
 import os
 import pickle
 import signal
-import threading
+from multiprocessing.synchronize import Event
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -76,7 +76,7 @@ class EstimatorNode(Node):
         self.time_stamp_last_command = sec
         self.perf_timings = deque(maxlen=5000)
 
-        dt = 1.0 / 200
+        dt = 1.0 / 200 # TODO get from vicon frequency
 
         self.current_header = None
         self.current_state = None
@@ -119,54 +119,46 @@ class EstimatorNode(Node):
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1,
         )
-        cg = ReentrantCallbackGroup()
+        # cg = ReentrantCallbackGroup()
 
         self.subscriber_frames = self.create_subscription(
             TFMessage,
             "/tf",
-            self.estimate_state,
-            qos_profile,
-            callback_group=MutuallyExclusiveCallbackGroup(),
+            self.estimate_state, 
+            qos_profile=qos_profile
         )
 
         self.subscriber_control = self.create_subscription(
             Float64MultiArray,
             f"/command_{self.settings.drone_name}",
-            self.update_control,
-            qos_profile,
-            callback_group=MutuallyExclusiveCallbackGroup(),
+            self.update_control, 
+            qos_profile=qos_profile
         )
 
         # pos, quat
         self.publisher_pose = self.create_publisher(
             PoseStamped,
             f"/estimated_state_pose_{self.settings.drone_name}",
-            qos_profile,
-            callback_group=MutuallyExclusiveCallbackGroup(),
+            qos_profile=qos_profile
         )
         # vel, angvel
         self.publisher_twist = self.create_publisher(
             TwistStamped,
             f"/estimated_state_twist_{self.settings.drone_name}",
-            qos_profile,
-            callback_group=MutuallyExclusiveCallbackGroup(),
+            qos_profile=qos_profile
         )
         # f_motors
         self.publisher_forces = self.create_publisher(
             Float64MultiArray,
             f"/estimated_state_forces_{self.settings.drone_name}",
-            qos_profile,
-            callback_group=MutuallyExclusiveCallbackGroup(),
+            qos_profile=qos_profile
         )
         # f_dis, t_dis
         self.publisher_wrench = self.create_publisher(
             WrenchStamped,
             f"/estimated_state_wrench_{self.settings.drone_name}",
-            qos_profile,
-            callback_group=MutuallyExclusiveCallbackGroup(),
+            qos_profile=qos_profile
         )
-
-        self.create_timer(dt, self.publish_state, callback_group=MutuallyExclusiveCallbackGroup())
 
         self.get_logger().info(f"Started estimator (process {os.getpid()})")
 
@@ -201,11 +193,11 @@ class EstimatorNode(Node):
                 self.time_stamp_last_command = time_stamp
             elif dt > 5e-4:  # accepting the new data point
                 self.time_stamp_last_measurement = time_stamp
-                # t1 = time.perf_counter()
                 self.current_header = header
+                # t1 = time.perf_counter()
                 self.current_state = self.estimator.step(pos_meas, quat_meas, dt)
-                # self.publish_state()  # self.current_state
                 # t2 = time.perf_counter()
+                # self.publish_state()  # self.current_state
                 # perf_time = t2 - t1
 
                 # if dt > 9e-3:
@@ -225,7 +217,7 @@ class EstimatorNode(Node):
                 #         throttle_duration_sec=2.0,
                 #     )
                 # AFTER publishing, we have time to store the data
-                if DEBUG_SAVE_DATA:
+                if self.settings.save_data:
                     if not self.input_needed:
                         append_measurement(
                             self.data_meas, time_stamp, pos_meas, quat_meas, [0.0, 0.0, 0.0, 0.0]
@@ -255,8 +247,8 @@ class EstimatorNode(Node):
                     self.estimator.set_input(np.zeros(4))
 
         t2 = time.perf_counter()
-        perf_time = t2 - t1
-        if DEBUG_TIMINGS:
+        if self.settings.timings:
+            perf_time = t2 - t1
             self.perf_timings.append(perf_time)
             t_avg = np.mean(self.perf_timings) * 1000
             t_max = np.max(self.perf_timings) * 1000
@@ -318,7 +310,12 @@ class EstimatorNode(Node):
     def shutdown(self, _, __):
         """TODO."""
         self.get_logger().info("Terminating")
-        if DEBUG_SAVE_DATA:
+
+        self.subscriber_frames.destroy()
+        self.subscriber_control.destroy()
+        time.sleep(0.5)
+        
+        if self.settings.save_data:
             self.get_logger().info("Saving data...")
             filename = f"data_{self.settings.drone_name}_"
             info = f"{self.settings.estimator_type}"
@@ -328,9 +325,7 @@ class EstimatorNode(Node):
                 pickle.dump(self.data_est, f)
             with open(filename + "measurement" + ".pkl", "wb") as f:
                 pickle.dump(self.data_meas, f)
-        self.subscriber_frames.destroy()
-        self.subscriber_control.destroy()
-        time.sleep(0.1)
+        
         self.publisher_pose.destroy()
         self.publisher_twist.destroy()
         self.publisher_forces.destroy()
@@ -341,9 +336,11 @@ class EstimatorNode(Node):
 
 def launch_estimators(estimators: dict):
     """TODO."""
-    rclpy.init()
     processes = []
     seen_drone_names = []
+    ctx = mp.get_context("spawn")
+    shutdown = ctx.Event()
+
     try:
         for k, v in estimators.items():
             if k.startswith("estimator"):
@@ -353,10 +350,9 @@ def launch_estimators(estimators: dict):
                     print(f"[ESTIMATOR]: Estimator for {name} already existing. Check settings")
                 else:
                     seen_drone_names.append(name)
-                    stop_event = mp.Event()
                     # not sure if daemon should be True or False
-                    p = mp.Process(target=launch_node, args=(settings, stop_event), daemon=True)
-                    processes.append((p, stop_event))
+                    p = ctx.Process(target=launch_node, args=(settings, shutdown), daemon=True)
+                    processes.append(p)
                     p.start()
 
         while True:
@@ -367,28 +363,26 @@ def launch_estimators(estimators: dict):
                 break
 
     finally:
-        for _, stop_event in processes:
-            stop_event.set()
+        shutdown.set()
 
-        for process, _ in processes:
-            process.join(timeout=2)
+        for p in processes:
+            p.join(timeout=2)
 
-        for process, _ in processes:
-            if process.is_alive():
-                print(f"Force terminating process {process.pid}")
-                process.terminate()
-                process.join()
+        for p in processes:
+            if p.is_alive():
+                print(f"Force terminating process {p.pid}")
+                p.terminate()
+                p.join()
 
         if rclpy.ok():
             rclpy.shutdown()
         print("All nodes terminated.")
 
 
-def launch_node(settings: Munch, stop_event: threading.Event):
+def launch_node(settings: Munch, stop_event: Event):
     """TODO."""
+    rclpy.init()
     node = EstimatorNode(settings)
-    executor = SingleThreadedExecutor()  # MultiThreadedExecutor() SingleThreadedExecutor
-    executor.add_node(node)
 
     signal.signal(signal.SIGINT, node.shutdown)
 
@@ -399,7 +393,6 @@ def launch_node(settings: Munch, stop_event: threading.Event):
     finally:
         ...  # pass
 
-    print(f"destroying node ")
     node.destroy_node()
     time.sleep(0.5)
     rclpy.shutdown()
@@ -419,16 +412,13 @@ if __name__ == "__main__":
     with open(path, "r") as f:
         estimators = munchify(toml.load(f))
 
-    # Global debug settings. Defaulting to False
-    debug_settings = estimators.get("debug", {})
-    DEBUG_TIMINGS = debug_settings.get("timings", False)
-    DEBUG_SAVE_DATA = debug_settings.get("save_data", False)
+    # Add debug to each estimator (if not already in place)
+    # ChatGPT code:
+    for key, val in estimators.items():
+        if key != 'debug' and isinstance(val, Munch):
+            for debug_key, debug_val in estimators.debug.items():
+                if debug_key not in val:
+                    val[debug_key] = debug_val
 
     launch_estimators(estimators)
 
-    # only launch first one. For testing only... TODO remove
-    # settings = estimators["estimator1"]
-    # rclpy.init()
-    # node = EstimatorNode(settings)
-    # rclpy.spin(node)
-    # rclpy.shutdown()
