@@ -8,13 +8,16 @@ TODO Subscribed and published topics...
 from __future__ import annotations
 
 import argparse
+import logging
 import multiprocessing as mp
 import os
 import pickle
+import select
 import signal
-from multiprocessing.synchronize import Event
 import time
 from collections import defaultdict, deque
+from multiprocessing.sharedctypes import SynchronizedArray
+from multiprocessing.synchronize import Event
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +27,7 @@ import toml
 
 # Message types: https://docs.ros2.org/foxy/api/geometry_msgs/index-msg.html
 from geometry_msgs.msg import PoseStamped, TwistStamped, WrenchStamped
+from lsy_models.utils import cf2
 from munch import Munch, munchify
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor, SingleThreadedExecutor
@@ -31,7 +35,6 @@ from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Float64MultiArray
 from tf2_msgs.msg import TFMessage
-from lsy_models.utils import cf2
 
 from lsy_estimators.estimator import KalmanFilter
 from lsy_estimators.estimator_legacy import StateEstimator
@@ -53,7 +56,7 @@ if TYPE_CHECKING:
     from lsy_estimators.structs import UKFData
 
 
-class EstimatorNode(Node):
+class MPEstimator:
     """This class starts an estimator and the necessary subscribers and publishers.
 
     Note: Since all results are published individually, one might want to
@@ -67,16 +70,63 @@ class EstimatorNode(Node):
 
     def __init__(self, settings: Munch):
         """TODO."""
-        super().__init__(f"Estimator_{settings.drone_name}")
+        ctx = mp.get_context("spawn")
+        self._shutdown = ctx.Event()
+        self._publish_update = ctx.Event()
+
+        # Logger setup
+        self.logger = logging.getLogger("ESTIMATOR" + "_" + settings.drone_name)
+        self.logger.setLevel(logging.INFO)
+        # Create console handler
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        # Create formatter with [name][LEVEL] prefix
+        formatter = logging.Formatter("[%(name)s][%(levelname)s] %(message)s")
+        # Add formatter to handler
+        console_handler.setFormatter(formatter)
+        # Add handler to logger (only once)
+        if not self.logger.hasHandlers():
+            self.logger.addHandler(console_handler)
+        # We allocate a buffer that is used to store the most recent tf message from the tf
+        # subscriber. The message contains four fields: The first element is the number of messages
+        # since the array was last cleared. This allows us to throw warnings in case the estimator
+        # loop cannot keep up. The second field is the timestamp in s, the third is the position
+        # (3d) and the fourth is the quaternion (4d)
+        self._tf_msg_buffer = ctx.Array("d", [0.0] * (1 + 1 + 3 + 4))
+        # Allocate the command subscriber buffer
+        cmd_dim = 4  # May change in the future to be dynamic
+        self._cmd_msg_buffer = ctx.Array("d", [0.0] * (1 + 1 + cmd_dim))
+        # Estimated state publisher buffers
+        self._pose_buffer = ctx.Array("d", [0.0] * 7)
+        self._twist_buffer = ctx.Array("d", [0.0] * 6)
+        self._forces_buffer = ctx.Array("d", [0.0] * 4)  # Motor forces, optional
+        self._wrench_buffer = ctx.Array("d", [0.0] * 6)  # External wrench, optional
+
+        args = (settings.drone_name, self._tf_msg_buffer, self._cmd_msg_buffer, self._shutdown)
+        self._sub_process = ctx.Process(target=self._subscriber_loop, args=args)
+
+        args = (
+            settings.drone_name,
+            self._pose_buffer,
+            self._twist_buffer,
+            self._forces_buffer,
+            self._wrench_buffer,
+            self._publish_update,
+            self._shutdown,
+        )
+        self._pub_process = ctx.Process(target=self._publisher_loop, args=args)
+
+        self._sub_process.start()
+        self._pub_process.start()
+
         self.input_needed = False
         self.initial_observation = None
         self.settings = settings
-        sec, _ = self.get_clock().now().seconds_nanoseconds()
-        self.time_stamp_last_measurement = sec
-        self.time_stamp_last_command = sec
+        self.time_stamp_last_prediction = 0
+        self.time_stamp_last_correction = 0
         self.perf_timings = deque(maxlen=5000)
 
-        dt = 1.0 / 200 # TODO get from vicon frequency
+        self.frequency = 240.0  # Hz # TODO get from vicon frequency
 
         self.current_header = None
         self.current_state = None
@@ -93,13 +143,13 @@ class EstimatorNode(Node):
                     or settings.estimate_forces_dist
                     or settings.estimate_torques_dist
                 ):
-                    self.get_logger().warning(
+                    self.logger.warning(
                         "Legacy estimator does not support force or torque estimation!"
                     )
             case "ukf":
                 self.input_needed = True
                 self.estimator = KalmanFilter(
-                    dt=dt,
+                    dt=1 / self.frequency,
                     model=settings.dynamics_model,  # mellinger_rpyt, fitted_DI_rpy
                     config=settings.drone_config,
                     estimate_forces_motor=settings.estimate_forces_motor,
@@ -111,152 +161,178 @@ class EstimatorNode(Node):
                     f"Estimator type {self.settings.estimator_type} not implemented."
                 )
 
-        # A better implementation would be:
-        # https://docs.ros.org/en/foxy/Tutorials/Intermediate/Tf2/Writing-A-Tf2-Listener-Py.html
-        # But for now this works and we don't care about a fixed publishing frequency
+        self.logger.info(f"Started estimator (process {os.getpid()})")
+
+    def run(self):
+        """Main estimator loop."""
+        # TODO if first measurement => init estimator
+        # self.estimator_init = False
+        k = 0
+        global_time = time.perf_counter()
+
+        try:
+            while not self._shutdown.is_set():
+                current_time = time.time()
+
+                with self._tf_msg_buffer.get_lock():
+                    data = np.asarray(self._tf_msg_buffer, dtype=np.float64, copy=True)
+                    self._tf_msg_buffer[0] = 0
+                n_tf_msg, tf_timestamp, pos, quat = data[0], data[1], data[2:5], data[5:]
+                with self._cmd_msg_buffer.get_lock():
+                    data = np.asarray(self._cmd_msg_buffer, dtype=np.float64, copy=True)
+                    self._cmd_msg_buffer[0] = 0
+                n_cmd_messages, cmd_timestamp, cmd = data[0], data[1], data[2:]
+
+                if n_cmd_messages >= 1:
+                    # The command is as it is sent to the drone, meaning for attitude interface:
+                    # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
+                    cmd[..., -1] = cf2.pwm2force(cmd[..., -1], self.estimator.constants)
+                    cmd[..., :-1] = np.deg2rad(cmd[..., :-1])
+                    self.estimator.set_input(cmd)  # TODO # compare times?
+
+                if n_tf_msg > 2:
+                    self.logger.warning("Dropping tf messages because estimator loop can't keep up")
+                    # TODO check for frequencies. If Vicon is running at higher frequency, of course estimator cant keep up
+
+                if n_tf_msg >= 1:
+                    dt = tf_timestamp - self.time_stamp_last_prediction
+                    self.time_stamp_last_prediction = tf_timestamp
+                    self.estimator.predict(dt)
+                    self.estimator.correct(pos, quat, dt)
+
+                dt = current_time - self.time_stamp_last_prediction
+                self.estimator.predict(dt)
+                self.time_stamp_last_prediction = current_time
+                self._publish_update.set()
+                remaining = (1 / self.frequency) - (time.time() - current_time) - 1.25 * 1e-4
+                k += 1
+                if k % 1000 == 0:
+                    print(f"Freg: {k / (time.perf_counter() - global_time)}")
+                if remaining > 0:
+                    time.sleep(remaining)
+        except KeyboardInterrupt:
+            self._shutdown.set()
+
+    @staticmethod
+    def _subscriber_loop(
+        drone_name: str,
+        _tf_msg_buffer: SynchronizedArray,
+        _cmd_msg_buffer: SynchronizedArray,
+        shutdown: Event,
+    ):
+        rclpy.init()
+        node = rclpy.create_node("estimator_sub_" + drone_name)
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
             history=QoSHistoryPolicy.KEEP_LAST,
             depth=1,
         )
-        # cg = ReentrantCallbackGroup()
+        signal.signal(signal.SIGINT, lambda c, _: shutdown.set())  # Gracefully handle Ctrl-C
 
-        self.subscriber_frames = self.create_subscription(
-            TFMessage,
-            "/tf",
-            self.estimate_state, 
-            qos_profile=qos_profile
+        def tf_callback(msg: TFMessage):
+            tf = find_transform(msg.transforms, drone_name)
+            if tf is None:
+                node.get_logger().warning(
+                    f"Drone {drone_name} could not have been found. Occluded?",
+                    throttle_duration_sec=0.5,
+                )
+                return
+            _, pos, quat = tf2array(tf)
+            # We do not use the ros header time here because we need to establish an ordering
+            # between observations and the model loop. We are not certain that the ros time stamp
+            # is comparable to the system time. Therefore, we create a new timestamp using the os
+            # time.
+            # TODO: Subtract a constant time to account for [Vicon -> ros2 pub -> ros2 sub] delay.
+            time_stamp = time.time()
+            with _tf_msg_buffer.get_lock():
+                _tf_msg_buffer[0] += 1
+                _tf_msg_buffer[1] = time_stamp
+                _tf_msg_buffer[2:5] = pos
+                _tf_msg_buffer[5:9] = quat
+
+        def cmd_callback(msg: Float64MultiArray):
+            # The command is as it is sent to the drone, meaning for attitude interface:
+            # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
+            with _cmd_msg_buffer.get_lock():
+                _cmd_msg_buffer[0] += 1
+                _cmd_msg_buffer[1] = time.time()
+                _cmd_msg_buffer[2:] = msg.data
+
+        sub_tf = node.create_subscription(TFMessage, "/tf", tf_callback, qos_profile=qos_profile)
+        sub_cmd = node.create_subscription(
+            Float64MultiArray, f"/command/{drone_name}", cmd_callback, qos_profile=qos_profile
         )
+        while not shutdown.is_set():
+            rclpy.spin_once(node, timeout_sec=0.1)
+        sub_tf.destroy()
+        sub_cmd.destroy()
+        node.destroy_node()
 
-        self.subscriber_control = self.create_subscription(
-            Float64MultiArray,
-            f"/command_{self.settings.drone_name}",
-            self.update_control, 
-            qos_profile=qos_profile
+    @staticmethod
+    def _publisher_loop(
+        drone_name: str,
+        pose_buffer: SynchronizedArray,
+        twist_buffer: SynchronizedArray,
+        forces_buffer: SynchronizedArray,
+        wrench_buffer: SynchronizedArray,
+        update: Event,
+        shutdown: Event,
+    ):
+        rclpy.init()
+        node = rclpy.create_node("estimator_sub_" + drone_name)
+        # TODO check if pubs are actually needed?
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
         )
-
         # pos, quat
-        self.publisher_pose = self.create_publisher(
-            PoseStamped,
-            f"/estimated_state_pose_{self.settings.drone_name}",
-            qos_profile=qos_profile
+        pub_pose = node.create_publisher(
+            PoseStamped, f"/estimator/{drone_name}/pose", qos_profile=qos_profile
         )
         # vel, angvel
-        self.publisher_twist = self.create_publisher(
-            TwistStamped,
-            f"/estimated_state_twist_{self.settings.drone_name}",
-            qos_profile=qos_profile
+        pub_twist = node.create_publisher(
+            TwistStamped, f"/estimator/{drone_name}/twist", qos_profile=qos_profile
         )
         # f_motors
-        self.publisher_forces = self.create_publisher(
-            Float64MultiArray,
-            f"/estimated_state_forces_{self.settings.drone_name}",
-            qos_profile=qos_profile
+        pub_forces = node.create_publisher(
+            Float64MultiArray, f"/estimator/{drone_name}/forces", qos_profile=qos_profile
         )
         # f_dis, t_dis
-        self.publisher_wrench = self.create_publisher(
-            WrenchStamped,
-            f"/estimated_state_wrench_{self.settings.drone_name}",
-            qos_profile=qos_profile
+        pub_wrench = node.create_publisher(
+            WrenchStamped, f"/estimator/{drone_name}/wrench", qos_profile=qos_profile
         )
+        signal.signal(signal.SIGINT, lambda c, _: shutdown.set())  # Gracefully handle Ctrl-C
 
-        self.get_logger().info(f"Started estimator (process {os.getpid()})")
+        # TODO clear arrays???
+        while not shutdown.is_set():
+            if not update.wait(0.5):
+                continue
+            time_stamp = time.time()
+            update.clear()
 
-    def estimate_state(self, msg: TFMessage):
-        """Estimates the full drone state based on the new measurements."""
-        t1 = time.perf_counter()
-        tf = find_transform(msg.transforms, self.settings.drone_name)
-        if tf is None:
-            self.get_logger().warning(
-                f"Drone {self.settings.drone_name} could not have been found. Occluded?",
-                throttle_duration_sec=0.5,
-            )
-        else:
-            header, pos_meas, quat_meas = tf2array(tf)
-            time_stamp = header2sec(header)
-            dt = time_stamp - self.time_stamp_last_measurement
+            pose = np.asarray(pose_buffer, dtype=np.float64, copy=True)
+            pose_stamped = create_pose(time_stamp, drone_name, pose[:3], pose[3:])
+            pub_pose.publish(pose_stamped)
 
-            if self.initial_observation is None:
-                self.initial_observation = (pos_meas, quat_meas)
-                self.estimator.set_state(pos_meas, quat_meas)
+            twist = np.asarray(twist_buffer, dtype=np.float64, copy=True)
+            twist_stamped = create_twist(time_stamp, drone_name, twist[:3], twist[3:])
+            pub_twist.publish(twist_stamped)
 
-            # self.get_logger().info(
-            #     f"New Measurement for {self.settings.drone_name}: time={time_stamp}, pos_meas={pos_meas}, quat_meas={quat_meas}"
-            # )
+            forces = np.asarray(forces_buffer, dtype=np.float64, copy=True)
+            # This type doesn't have a stamp!
+            forces_array = create_array(time_stamp, drone_name, forces)
+            pub_forces.publish(forces_array)
 
-            # rot = R.from_quat(quat_meas)
-            # print(f"rpy_meas={rot.as_euler('xyz', degrees=True)}")
+            wrench = np.asarray(wrench_buffer, dtype=np.float64, copy=True)
+            wrench_stamped = create_wrench(time_stamp, drone_name, wrench[:3], wrench[3:])
+            pub_wrench.publish(wrench_stamped)
 
-            if dt < 0:  # This should only be executed when playing rosbags
-                self.get_logger().warning("dt < 0s! Assuming rosbag is played. Setting time to now")
-                self.time_stamp_last_measurement = time_stamp
-                self.time_stamp_last_command = time_stamp
-            elif dt > 5e-4:  # accepting the new data point
-                self.time_stamp_last_measurement = time_stamp
-                self.current_header = header
-                # t1 = time.perf_counter()
-                self.current_state = self.estimator.step(pos_meas, quat_meas, dt)
-                # t2 = time.perf_counter()
-                # self.publish_state()  # self.current_state
-                # perf_time = t2 - t1
-
-                # if dt > 9e-3:
-                #     self.get_logger().warning(
-                #         f"Can't keept up... Time since last estimation: {dt * 1e3:.2f}ms."
-                #         # throttle_duration_sec=0.5,
-                #     )
-
-                # AFTER publishing, we have time to store and print timings
-                # if DEBUG_TIMINGS:
-                #     self.perf_timings.append(perf_time)
-                #     t_avg = np.mean(self.perf_timings) * 1000
-                #     t_max = np.max(self.perf_timings) * 1000
-                #     t_min = np.min(self.perf_timings) * 1000
-                #     self.get_logger().info(
-                #         f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms, datapoints {len(self.perf_timings)}",
-                #         throttle_duration_sec=2.0,
-                #     )
-                # AFTER publishing, we have time to store the data
-                if self.settings.save_data:
-                    if not self.input_needed:
-                        append_measurement(
-                            self.data_meas, time_stamp, pos_meas, quat_meas, [0.0, 0.0, 0.0, 0.0]
-                        )
-                    else:
-                        append_measurement(
-                            self.data_meas, time_stamp, pos_meas, quat_meas, self.estimator.data.u
-                        )
-                    append_state(self.data_est, time_stamp, self.current_state)
-            else:
-                self.get_logger().info(
-                    f"Received too high frequency measurements (dt = {dt * 1000:.1f}ms). Ignoring data point..."
-                )
-
-            # print(f"time_stamp={time_stamp}, time_step_command={self.time_stamp_last_command}")
-            # Before finishing, we should also check how recent the control inputs were
-            dt_cmd = time_stamp - self.time_stamp_last_command
-            if dt_cmd > 1:
-                # TODO Move this into Kalman Filter
-                # TODO Change varQ_forces_motor based on how old the estimate is
-                # TODO change process and input noise depending on measurement
-                if self.input_needed:
-                    self.get_logger().warning(
-                        f"Haven't received a new command in {dt_cmd:.0f}s. Setting it to zero.",
-                        throttle_duration_sec=5.0,
-                    )
-                    self.estimator.set_input(np.zeros(4))
-
-        t2 = time.perf_counter()
-        if self.settings.timings:
-            perf_time = t2 - t1
-            self.perf_timings.append(perf_time)
-            t_avg = np.mean(self.perf_timings) * 1000
-            t_max = np.max(self.perf_timings) * 1000
-            t_min = np.min(self.perf_timings) * 1000
-            self.get_logger().info(
-                f"t_avg={t_avg:.3f}ms, t_min={t_min:.3f}ms, t_max={t_max:.3f}ms, datapoints {len(self.perf_timings)}",
-                throttle_duration_sec=2.0,
-            )
+        pub_pose.destroy()
+        pub_twist.destroy()
+        pub_forces.destroy()
+        pub_wrench.destroy()
+        node.destroy_node()
 
     def update_control(self, control: Float64MultiArray):
         """TODO."""
@@ -272,51 +348,21 @@ class EstimatorNode(Node):
         # Thrust to N
         rpyt[..., -1] = cf2.pwm2force(rpyt[..., -1], self.estimator.constants)
         # Angle to rad
-        rpyt[..., :-1] *= np.pi/180
+        rpyt[..., :-1] *= np.pi / 180
 
         # self.get_logger().info(f"set input to {rpyt}")
 
         self.estimator.set_input(rpyt)
 
-    def publish_state(self):  # TODO state type
+    def close(self):
         """TODO."""
-        # TODO time this
+        self.logger.info(f"Estimator {self.settings.drone_name} shutdown")
+        self._shutdown.set()
+        self._sub_process.join()
+        self._pub_process.join()
 
-        # self.get_logger().info(f"Published for {self.settings.drone_name}: {state}", throttle_duration_sec=0.5)
-        # self.get_logger().info(
-        #     f"Published for {self.settings.drone_name}: {state.pos}, {state.quat}, {state.vel}, {state.angvel}"
-        # )
-        if self.current_header is None or self.current_state is None:
-            return
-
-        header = self.current_header
-        state = self.current_state
-
-        transform = create_pose(header, self.settings.drone_name, state.pos, state.quat)
-        self.publisher_pose.publish(transform)
-
-        twist = create_twist(header, self.settings.drone_name, state.vel, state.angvel)
-        self.publisher_twist.publish(twist)
-
-        forces = create_array(header, self.settings.drone_name, state.forces_motor)
-        # This type doesn't have a stamp!
-        self.publisher_forces.publish(forces)
-
-        wrench = create_wrench(
-            header, self.settings.drone_name, state.forces_dist, state.torques_dist
-        )
-        self.publisher_wrench.publish(wrench)
-
-    def shutdown(self, _, __):
-        """TODO."""
-        self.get_logger().info("Terminating")
-
-        self.subscriber_frames.destroy()
-        self.subscriber_control.destroy()
-        time.sleep(0.5)
-        
         if self.settings.save_data:
-            self.get_logger().info("Saving data...")
+            self.logger.info("Saving data...")
             filename = f"data_{self.settings.drone_name}_"
             info = f"{self.settings.estimator_type}"
             if self.settings.estimator_type != "legacy":
@@ -325,13 +371,6 @@ class EstimatorNode(Node):
                 pickle.dump(self.data_est, f)
             with open(filename + "measurement" + ".pkl", "wb") as f:
                 pickle.dump(self.data_meas, f)
-        
-        self.publisher_pose.destroy()
-        self.publisher_twist.destroy()
-        self.publisher_forces.destroy()
-        self.publisher_wrench.destroy()
-        # time.sleep(0.1)
-        self.destroy_node()
 
 
 def launch_estimators(estimators: dict):
@@ -342,25 +381,22 @@ def launch_estimators(estimators: dict):
     shutdown = ctx.Event()
 
     try:
-        for k, v in estimators.items():
-            if k.startswith("estimator"):
-                settings = v
-                name = settings.drone_name
-                if name in seen_drone_names:
-                    print(f"[ESTIMATOR]: Estimator for {name} already existing. Check settings")
-                else:
-                    seen_drone_names.append(name)
-                    # not sure if daemon should be True or False
-                    p = ctx.Process(target=launch_node, args=(settings, shutdown), daemon=True)
-                    processes.append(p)
-                    p.start()
+        for k, settings in estimators.items():
+            name = settings.drone_name
+            if name in seen_drone_names:
+                print(f"[ESTIMATOR_{name}]  Estimator for {name} already existing. Check settings")
+                continue
+            seen_drone_names.append(name)
+            # not sure if daemon should be True or False
+            p = ctx.Process(target=launch_node, args=(settings, shutdown))
+            processes.append(p)
+            p.start()
 
-        while True:
-            try:
-                time.sleep(0.1)
-            except KeyboardInterrupt:
-                print("\nKeyboard interrupt received. Terminating nodes...")
-                break
+        try:
+            while True:
+                time.sleep(10.0)
+        except KeyboardInterrupt:
+            print("\nKeyboard interrupt received. Terminating nodes...")
 
     finally:
         shutdown.set()
@@ -382,43 +418,35 @@ def launch_estimators(estimators: dict):
 def launch_node(settings: Munch, stop_event: Event):
     """TODO."""
     rclpy.init()
-    node = EstimatorNode(settings)
-
-    signal.signal(signal.SIGINT, node.shutdown)
-
+    estimator = MPEstimator(settings)
     try:
-        while rclpy.ok() and not stop_event.is_set():
-            rclpy.spin_once(node, timeout_sec=1e-3)
-            # executor.spin_once(timeout_sec=1e-3)
+        estimator.run()
     finally:
-        ...  # pass
-
-    node.destroy_node()
-    time.sleep(0.5)
-    rclpy.shutdown()
+        estimator.close()
 
 
 if __name__ == "__main__":
     np.set_printoptions(linewidth=400, precision=3)  # TODO remove
+    logging.basicConfig(level=logging.INFO)
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--settings", default="ros_nodes/estimators.toml", help="Path to Settings file"
     )
     args = parser.parse_args()
-    path = args.settings
 
-    path = Path(Path(__file__).parents[1] / path)
+    path = Path(__file__).parents[1] / args.settings
     with open(path, "r") as f:
         estimators = munchify(toml.load(f))
 
     # Add debug to each estimator (if not already in place)
-    # ChatGPT code:
     for key, val in estimators.items():
-        if key != 'debug' and isinstance(val, Munch):
-            for debug_key, debug_val in estimators.debug.items():
-                if debug_key not in val:
-                    val[debug_key] = debug_val
+        if not key.startswith("estimator"):
+            continue
+        for debug_key, debug_val in estimators.get("debug", {}).items():
+            if debug_key not in val:
+                val[debug_key] = debug_val
+
+    estimators = munchify({k: v for k, v in estimators.items() if k.startswith("estimator")})
 
     launch_estimators(estimators)
-

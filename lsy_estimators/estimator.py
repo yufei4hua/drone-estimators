@@ -15,6 +15,7 @@ from lsy_estimators.filterpy import (
     SigmaPointsSettings,
     UKFData,
     UKFSettings,
+    ukf_correct,
     ukf_predict,
     ukf_predict_correct,
 )
@@ -282,20 +283,54 @@ class KalmanFilter(Estimator):
         Return:
             New state prediction
         """
+        # Check if time step is positive
+        if dt <= 0:
+            return self.data
+
         # Update the input
         if command is not None:
             self.set_input(command)
 
         # Update observation and dt
         # dt hast to be vectorized to work properly in jax
+        self.data = self.data.replace(z=np.concat((pos, quat)), dt=np.array([dt]))
 
-        if dt > 0:
-            self.data = self.data.replace(z=np.concat((pos, quat)), dt=np.array([dt]))
+        # if self.data.dt > 0:  # TODO make dt check more elegant and catch all errors
+        # self.data = ukf_predict(self.data, self.settings)
+        # self.data = ukf_predict(self.data, self.settings)
+        self.data = ukf_predict_correct(self.data, self.settings)
 
-            # if self.data.dt > 0:  # TODO make dt check more elegant and catch all errors
-            # self.data = ukf_predict(self.data, self.settings)
-            # self.data = ukf_predict(self.data, self.settings)
-            self.data = ukf_predict_correct(self.data, self.settings)
+        return self.data
+
+    def predict(self, dt: float, command: Array | None = None) -> UKFData:
+        """TODO."""
+        # Check if time step is positive
+        if dt <= 0:
+            return self.data
+
+        # Update the input
+        if command is not None:
+            self.set_input(command)
+
+        # Update observation and dt
+        # dt hast to be vectorized to work properly in jax
+        self.data = self.data.replace(dt=np.array([dt]))
+
+        self.data = ukf_predict(self.data, self.settings)
+
+        return self.data
+
+    def correct(self, pos: Array, quat: Array, command: Array | None = None) -> UKFData:
+        """TODO."""
+        # Update the input
+        if command is not None:
+            self.set_input(command)
+
+        # Update observation and dt
+        # dt hast to be vectorized to work properly in jax
+        self.data = self.data.replace(z=np.concat((pos, quat)))
+
+        self.data = ukf_correct(self.data, self.settings)
 
         return self.data
 

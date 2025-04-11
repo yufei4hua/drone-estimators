@@ -172,37 +172,37 @@ def ukf_predict(data: UKFData, settings: UKFSettings) -> UKFData:
     return data
 
 
-# def ukf_correct(data: UKFData, settings: UKFSettings) -> UKFData:
-#     """TODO."""
-#     xp = data.covariance.__array_namespace__()
-#     # Pass prior sigmas through measurment function h(x,u,dt) to get measurement sigmas
-#     sigmas_h = settings.hx(data.sigmas_f, data.u, data.dt)
-#     data = data.replace(sigmas_h=sigmas_h)
+def ukf_correct(data: UKFData, settings: UKFSettings) -> UKFData:
+    """TODO."""
+    xp = data.covariance.__array_namespace__()
+    # Pass prior sigmas through measurment function h(x,u,dt) to get measurement sigmas
+    sigmas_h = settings.hx(data.sigmas_f, data.u, data.dt)
+    data = data.replace(sigmas_h=sigmas_h)
 
-#     # Pass mean and covariance of prediction through unscented transform
-#     zp, S = ukf_unscented_transform(
-#         data.sigmas_h, settings.SPsettings.Wm, settings.SPsettings.Wc, settings.R
-#     )
-#     # SI = xp.linalg.inv(data.S)
-#     # data = data.replace(S=S, SI=SI)
-#     data = data.replace(S=S)
+    # Pass mean and covariance of prediction through unscented transform
+    zp, S = ukf_unscented_transform(
+        data.sigmas_h, settings.SPsettings.Wm, settings.SPsettings.Wc, settings.R
+    )
+    # SI = xp.linalg.inv(data.S)
+    # data = data.replace(S=S, SI=SI)
+    data = data.replace(S=S)
 
-#     # compute cross variance
-#     Pxz = ukf_cross_variance(data.x, zp, data.sigmas_f, data.sigmas_h, settings.SPsettings.Wc)
-#     # K = xp.dot(Pxz, data.SI)       # Kalman gain
-#     # K @ S = Pxz => K = Pxz @ S^-1 => or: S.T @ K.T = Pxz.T
-#     K = xp.linalg.solve(S.T, Pxz.T).T
-#     y = xp.subtract(data.z, zp)  # residual
-#     data = data.replace(K=K, y=y)
+    # compute cross variance
+    Pxz = ukf_cross_variance(data.x, zp, data.sigmas_f, data.sigmas_h, settings.SPsettings.Wc)
+    # K = xp.dot(Pxz, data.SI)       # Kalman gain
+    # K @ S = Pxz => K = Pxz @ S^-1 => or: S.T @ K.T = Pxz.T
+    K = xp.linalg.solve(S.T, Pxz.T).T
+    y = xp.subtract(data.z, zp)  # residual
+    data = data.replace(K=K, y=y)
 
-#     # Update Gaussian state estimate (x, P)
-#     x = data.x + xp.dot(data.K, data.y)
-#     P = data.P - xp.dot(data.K, xp.dot(data.S, data.K.T))
+    # Update Gaussian state estimate (x, P)
+    x = data.x + xp.dot(data.K, data.y)
+    P = data.P - xp.dot(data.K, xp.dot(data.S, data.K.T))
 
-#     # Safe posterior
-#     data = data.replace(x=x, P=P, x_post=x, P_post=P)
+    # Safe posterior
+    data = data.replace(x=x, P=P, x_post=x, P_post=P)
 
-#     return data
+    return data
 
 
 def ukf_calculate_sigma_points(data: UKFData, settings: UKFSettings) -> NDArray[np.floating]:

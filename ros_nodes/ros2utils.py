@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from jax import Array as JaxArray
     from numpy.typing import NDArray
+    from rclpy.time import Time
     from std_msgs.msg import Header
     from torch import Tensor
 
@@ -21,7 +22,9 @@ if TYPE_CHECKING:
     Array = NDArray | JaxArray | Tensor
 
 
-def find_transform(transforms: list[TransformStamped], child_frame_id: str) -> TransformStamped:
+def find_transform(
+    transforms: list[TransformStamped], child_frame_id: str
+) -> TransformStamped | None:
     """Finds the transform of a given child frame."""
     return next((tf for tf in transforms if tf.child_frame_id == child_frame_id), None)
 
@@ -49,10 +52,18 @@ def tf2array(tf: TransformStamped) -> tuple[Header, Array, Array]:
     return tf.header, pos, quat
 
 
-def create_pose(header: Header, drone: str, pos: Array, quat: Array) -> PoseStamped:
+def time2sec_nsec(t: float) -> tuple[int, int]:
+    sec = int(t)
+    nsec = int(1e9 * (t - sec))
+    return sec, nsec
+
+
+def create_pose(time_stamp: float, drone: str, pos: Array, quat: Array) -> PoseStamped:
     """Creates a PoseStamped from position and orientation."""
     pose = PoseStamped()
-    pose.header = header
+    sec, nsec = time2sec_nsec(time_stamp)
+    pose.header.stamp.sec = sec
+    pose.header.stamp.nanosec = nsec
     pose.header.frame_id = "world"
     pose.pose.position.x = pos[0]
     pose.pose.position.y = pos[1]
@@ -65,10 +76,12 @@ def create_pose(header: Header, drone: str, pos: Array, quat: Array) -> PoseStam
     return pose
 
 
-def create_twist(header: Header, drone: str, vel: Array, angvel: Array) -> TwistStamped:
+def create_twist(time_stamp: float, drone: str, vel: Array, angvel: Array) -> TwistStamped:
     """Creates a TwistStamped based on velocity and angular velocity."""
     twist = TwistStamped()
-    twist.header = header
+    sec, nsec = time2sec_nsec(time_stamp)
+    twist.header.stamp.sec = sec
+    twist.header.stamp.nanosec = nsec
     twist.header.frame_id = drone
     twist.twist.linear.x = vel[0]
     twist.twist.linear.y = vel[1]
@@ -80,7 +93,7 @@ def create_twist(header: Header, drone: str, vel: Array, angvel: Array) -> Twist
     return twist
 
 
-def create_array(header: Header, drone: str, data: Array | None) -> Float64MultiArray:
+def create_array(time_stamp: float, drone: str, data: Array | None) -> Float64MultiArray:
     """Creates a generic Float64Array with the length of data.
 
     If data is None, an array zeros of length 4 is created.
@@ -96,14 +109,16 @@ def create_array(header: Header, drone: str, data: Array | None) -> Float64Multi
 
 
 def create_wrench(
-    header: Header, drone: str, force: Array | None, torque: Array | None
+    time_stamp: float, drone: str, force: Array | None, torque: Array | None
 ) -> WrenchStamped:
     """Creates a WrenchStamped based on force and torque.
 
     If force or torque is None, it gets set to zeros.
     """
     wrench = WrenchStamped()
-    wrench.header = header
+    sec, nsec = time2sec_nsec(time_stamp)
+    wrench.header.stamp.sec = sec
+    wrench.header.stamp.nanosec = nsec
     wrench.header.frame_id = drone
     if force is not None:
         wrench.wrench.force.x = force[0]

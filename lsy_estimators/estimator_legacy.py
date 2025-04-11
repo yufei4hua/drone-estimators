@@ -95,6 +95,24 @@ class StateEstimator(object):
             self.pos, np.array(np.roll(self.quat, -1)).astype(float), self.vel, self.omega_b
         )
 
+    def predict(self, dt, command=None):
+        """This function is not part of the legacy estimator and only for compatability."""
+        # Since the legacy estimator doesn't inherently support the prediction/correction
+        # form of a Kalman filter, we only step the time in the prediction step. In the
+        # correction step, we use the accumulated time step size to correct with the
+        # correct dt.
+        self.dt += dt
+
+    def correct(self, pos, quat, command=None):
+        """This function is not part of the legacy estimator and only for compatability."""
+        # Since the legacy estimator doesn't inherently support the prediction/correction
+        # form of a Kalman filter, we only step the time in the prediction step. In the
+        # correction step, we use the accumulated time step size to correct with the
+        # correct dt.
+        data = self.step(pos, quat, self.dt, command)
+        self.dt = 0
+        return data
+
     def set_input(self, command):
         """This function is not part of the legacy estimator and only for compatability."""
         pass
