@@ -12,12 +12,9 @@ import logging
 import multiprocessing as mp
 import os
 import pickle
-import select
 import signal
 import time
 from collections import defaultdict, deque
-from multiprocessing.sharedctypes import SynchronizedArray
-from multiprocessing.synchronize import Event
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -51,6 +48,8 @@ from ros_nodes.ros2utils import (
 )
 
 if TYPE_CHECKING:
+    from multiprocessing.synchronize import Event, Barrier
+    from multiprocessing.sharedctypes import SynchronizedArray
     from std_msgs.msg import Header
 
     from lsy_estimators.structs import UKFData
@@ -73,6 +72,7 @@ class MPEstimator:
         ctx = mp.get_context("spawn")
         self._shutdown = ctx.Event()
         self._publish_update = ctx.Event()
+        startup = ctx.Barrier(3)  # Main process, _subscriber_loop, _publisher_loop
 
         # Logger setup
         self.logger = logging.getLogger("ESTIMATOR" + "_" + settings.drone_name)
@@ -102,7 +102,13 @@ class MPEstimator:
         self._forces_buffer = ctx.Array("d", [0.0] * 4)  # Motor forces, optional
         self._wrench_buffer = ctx.Array("d", [0.0] * 6)  # External wrench, optional
 
-        args = (settings.drone_name, self._tf_msg_buffer, self._cmd_msg_buffer, self._shutdown)
+        args = (
+            settings.drone_name,
+            self._tf_msg_buffer,
+            self._cmd_msg_buffer,
+            startup,
+            self._shutdown,
+        )
         self._sub_process = ctx.Process(target=self._subscriber_loop, args=args)
 
         args = (
@@ -112,12 +118,14 @@ class MPEstimator:
             self._forces_buffer,
             self._wrench_buffer,
             self._publish_update,
+            startup,
             self._shutdown,
         )
         self._pub_process = ctx.Process(target=self._publisher_loop, args=args)
 
         self._sub_process.start()
         self._pub_process.start()
+        startup.wait(10.0)
 
         self.input_needed = False
         self.initial_observation = None
@@ -126,7 +134,7 @@ class MPEstimator:
         self.time_stamp_last_correction = 0
         self.perf_timings = deque(maxlen=5000)
 
-        self.frequency = 240.0  # Hz # TODO get from vicon frequency
+        self.frequency = settings.frequency  # Hz # TODO get from vicon frequency
 
         self.current_header = None
         self.current_state = None
@@ -183,7 +191,7 @@ class MPEstimator:
                     self._cmd_msg_buffer[0] = 0
                 n_cmd_messages, cmd_timestamp, cmd = data[0], data[1], data[2:]
 
-                if n_cmd_messages >= 1:
+                if n_cmd_messages >= 1 and self.input_needed:
                     # The command is as it is sent to the drone, meaning for attitude interface:
                     # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
                     cmd[..., -1] = cf2.pwm2force(cmd[..., -1], self.estimator.constants)
@@ -201,13 +209,29 @@ class MPEstimator:
                     self.estimator.correct(pos, quat, dt)
 
                 dt = current_time - self.time_stamp_last_prediction
-                self.estimator.predict(dt)
+                data = self.estimator.predict(dt)
                 self.time_stamp_last_prediction = current_time
+                with self._pose_buffer.get_lock():
+                    self._pose_buffer[:3] = data.pos
+                    self._pose_buffer[3:] = data.quat
+                with self._twist_buffer.get_lock():
+                    self._twist_buffer[:3] = data.vel
+                    self._twist_buffer[3:] = data.ang_vel
+                if data.forces_motor is not None:
+                    with self._forces_buffer.get_lock():
+                        self._forces_buffer[:] = data.forces_motor
+                if data.forces_dist is not None:
+                    with self._wrench_buffer.get_lock():
+                        self._wrench_buffer[:3] = data.forces_dist
+                        if data.torques_dist is not None:
+                            self._wrench_buffer[3:] = data.torques_dist
                 self._publish_update.set()
-                remaining = (1 / self.frequency) - (time.time() - current_time) - 1.25 * 1e-4
-                k += 1
+                remaining = (
+                    (1 / self.frequency) - (time.time() - current_time) - 1.25 * 1e-4
+                )  # TODO remove magic number
                 if k % 1000 == 0:
-                    print(f"Freg: {k / (time.perf_counter() - global_time)}")
+                    self.logger.info(f"Freq: {k / (time.perf_counter() - global_time)}")
+                k += 1
                 if remaining > 0:
                     time.sleep(remaining)
         except KeyboardInterrupt:
@@ -218,6 +242,7 @@ class MPEstimator:
         drone_name: str,
         _tf_msg_buffer: SynchronizedArray,
         _cmd_msg_buffer: SynchronizedArray,
+        startup: Barrier,
         shutdown: Event,
     ):
         rclpy.init()
@@ -260,8 +285,13 @@ class MPEstimator:
 
         sub_tf = node.create_subscription(TFMessage, "/tf", tf_callback, qos_profile=qos_profile)
         sub_cmd = node.create_subscription(
-            Float64MultiArray, f"/command/{drone_name}", cmd_callback, qos_profile=qos_profile
+            Float64MultiArray,
+            f"/drones/{drone_name}/command",
+            cmd_callback,
+            qos_profile=qos_profile,
         )
+        startup.wait(10.0)  # Register this process as ready for startup barrier
+
         while not shutdown.is_set():
             rclpy.spin_once(node, timeout_sec=0.1)
         sub_tf.destroy()
@@ -276,6 +306,7 @@ class MPEstimator:
         forces_buffer: SynchronizedArray,
         wrench_buffer: SynchronizedArray,
         update: Event,
+        startup: Barrier,
         shutdown: Event,
     ):
         rclpy.init()
@@ -288,21 +319,22 @@ class MPEstimator:
         )
         # pos, quat
         pub_pose = node.create_publisher(
-            PoseStamped, f"/estimator/{drone_name}/pose", qos_profile=qos_profile
+            PoseStamped, f"/drones/{drone_name}/estimate/pose", qos_profile=qos_profile
         )
-        # vel, angvel
+        # vel, ang_vel
         pub_twist = node.create_publisher(
-            TwistStamped, f"/estimator/{drone_name}/twist", qos_profile=qos_profile
+            TwistStamped, f"/drones/{drone_name}/estimate/twist", qos_profile=qos_profile
         )
         # f_motors
         pub_forces = node.create_publisher(
-            Float64MultiArray, f"/estimator/{drone_name}/forces", qos_profile=qos_profile
+            Float64MultiArray, f"/drones/{drone_name}/estimate/forces", qos_profile=qos_profile
         )
         # f_dis, t_dis
         pub_wrench = node.create_publisher(
-            WrenchStamped, f"/estimator/{drone_name}/wrench", qos_profile=qos_profile
+            WrenchStamped, f"/drones/{drone_name}/estimate/wrench", qos_profile=qos_profile
         )
         signal.signal(signal.SIGINT, lambda c, _: shutdown.set())  # Gracefully handle Ctrl-C
+        startup.wait(10.0)  # Register this process as ready for startup barrier
 
         # TODO clear arrays???
         while not shutdown.is_set():
@@ -333,26 +365,6 @@ class MPEstimator:
         pub_forces.destroy()
         pub_wrench.destroy()
         node.destroy_node()
-
-    def update_control(self, control: Float64MultiArray):
-        """TODO."""
-        # Storing the time of the current command
-        # Note: Not using now() under the assumption that the measurements are very frequent (200Hz)
-        # This is to allow us to also play rosbags without breaking functionality
-        self.time_stamp_last_command = self.time_stamp_last_measurement
-
-        # The command is as it is sent to the drone, meaning for attitude interface:
-        # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
-        rpyt = np.array(control.data)
-
-        # Thrust to N
-        rpyt[..., -1] = cf2.pwm2force(rpyt[..., -1], self.estimator.constants)
-        # Angle to rad
-        rpyt[..., :-1] *= np.pi / 180
-
-        # self.get_logger().info(f"set input to {rpyt}")
-
-        self.estimator.set_input(rpyt)
 
     def close(self):
         """TODO."""
@@ -443,9 +455,9 @@ if __name__ == "__main__":
     for key, val in estimators.items():
         if not key.startswith("estimator"):
             continue
-        for debug_key, debug_val in estimators.get("debug", {}).items():
-            if debug_key not in val:
-                val[debug_key] = debug_val
+        for global_key, global_val in estimators.get("global", {}).items():
+            if global_key not in val:
+                val[global_key] = global_val
 
     estimators = munchify({k: v for k, v in estimators.items() if k.startswith("estimator")})
 

@@ -22,7 +22,7 @@ class UKFData:
     pos: Array
     quat: Array
     vel: Array
-    angvel: Array
+    ang_vel: Array
     forces_motor: Array | None
     forces_dist: Array | None
     torques_dist: Array | None
@@ -45,7 +45,7 @@ class UKFData:
         pos = np.zeros(3)
         quat = np.array([0, 0, 0, 1])
         vel = np.zeros(3)
-        angvel = np.zeros(3)
+        ang_vel = np.zeros(3)
         dim_x = 13
         if forces_motor:
             forces_motor = np.zeros(4)
@@ -70,7 +70,7 @@ class UKFData:
         dt = 1
 
         return cls(
-            pos, quat, vel, angvel, forces_motor, forces_dist, torques_dist, covariance, u, z, dt
+            pos, quat, vel, ang_vel, forces_motor, forces_dist, torques_dist, covariance, u, z, dt
         )
 
     @classmethod
@@ -79,7 +79,7 @@ class UKFData:
         pos: Array,
         quat: Array,
         vel: Array,
-        angvel: Array,
+        ang_vel: Array,
         forces_motor: Array | None = None,
         forces_dist: Array | None = None,
         torques_dist: Array | None = None,
@@ -100,14 +100,14 @@ class UKFData:
         dt = 1
 
         return cls(
-            pos, quat, vel, angvel, forces_motor, forces_dist, torques_dist, covariance, u, z, dt
+            pos, quat, vel, ang_vel, forces_motor, forces_dist, torques_dist, covariance, u, z, dt
         )
 
     @classmethod
     def as_state_array(cls, data: UKFData) -> Array:
         """Returns the state as an array."""
         xp = data.pos.__array_namespace__()
-        x = xp.concat((data.pos, data.quat, data.vel, data.angvel), axis=-1)
+        x = xp.concat((data.pos, data.quat, data.vel, data.ang_vel), axis=-1)
         if data.forces_motor is not None:
             x = xp.concat((x, data.forces_motor), axis=-1)
         if data.forces_dist is not None:
@@ -122,7 +122,7 @@ class UKFData:
         pos = array[..., 0:3]
         quat = array[..., 3:7]
         vel = array[..., 7:10]
-        angvel = array[..., 10:13]
+        ang_vel = array[..., 10:13]
         idx = 13
         if data.forces_motor is not None:
             forces_motor = array[..., idx : idx + 4]
@@ -144,7 +144,7 @@ class UKFData:
             pos=pos,
             quat=quat,
             vel=vel,
-            angvel=angvel,
+            ang_vel=ang_vel,
             forces_motor=forces_motor,
             forces_dist=forces_dist,
             torques_dist=torques_dist,

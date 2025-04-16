@@ -76,10 +76,10 @@ def setaxs2(axs2, t_start, t_end):
     axs2[0, 3].set_title("Angular velocity error x [rad/s]")
     axs2[1, 3].set_title("Angular velocity error y [rad/s]")
     axs2[2, 3].set_title("Angular velocity error z[rad/s]")
-    err_angvel = 5e-1
-    axs2[0, 3].set_ylim(-err_angvel, err_angvel)
-    axs2[1, 3].set_ylim(-err_angvel, err_angvel)
-    axs2[2, 3].set_ylim(-err_angvel, err_angvel)
+    err_ang_vel = 5e-1
+    axs2[0, 3].set_ylim(-err_ang_vel, err_ang_vel)
+    axs2[1, 3].set_ylim(-err_ang_vel, err_ang_vel)
+    axs2[2, 3].set_ylim(-err_ang_vel, err_ang_vel)
 
     for ax in axs2.flat:
         ax.legend()
@@ -493,7 +493,7 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
     ##################################################
     ### Data preprocessing
     ##################################################
-    # Calculating measured vel and angvel from finite differences
+    # Calculating measured vel and ang_vel from finite differences
     # However, first check if data is from sim => vel and ang_vel are available
     if len(data_meas["vel"]) == 0:
         dt_avg = np.mean(np.diff(data_meas["time"]))
@@ -513,13 +513,13 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
         data_meas["ang_vel"] = rpy_dot / 180 * np.pi
         # data_meas["ang_vel"] = rot.apply(rpy_dot / 180 * np.pi)
 
-    # data_meas["ang_vel"] = quat2angvel(quat_meas_filtered, data_meas["time"])
+    # data_meas["ang_vel"] = quat2ang_vel(quat_meas_filtered, data_meas["time"])
 
     # estimator_datasets[0]["ang_vel"]
 
     # dquat = np.gradient(quat_meas_filtered, data_meas["time"], axis=0)
     # dquat_filtered = savgol_filter(data_meas["quat"], 7, 2, deriv=1, delta=dt_avg, axis=0)
-    # data_meas["ang_vel"] = dquat2angvel(
+    # data_meas["ang_vel"] = dquat2ang_vel(
     #     quat_meas_filtered, dquat_filtered, np.diff(data_meas["time"], prepend=1.0 / 200)
     # )
     # data_meas["ang_vel"] = savgol_filter(data_meas["ang_vel"], 7, 2, deriv=1, delta=dt_avg, axis=0)
@@ -555,8 +555,8 @@ def plots(data_meas, estimator_types, estimator_datasets, animate=False, order="
         pos = rmse(data_est["pos_error"])
         quat = rmse(data_est["quat_error"])
         vel = rmse(data_est["vel_error"])
-        angvel = rmse(data_est["ang_vel_error"])
-        print(f"{estimator_types[i]} RMSE: pos={pos}, quat={quat}, vel={vel}, angvel={angvel}")
+        ang_vel = rmse(data_est["ang_vel_error"])
+        print(f"{estimator_types[i]} RMSE: pos={pos}, quat={quat}, vel={vel}, ang_vel={ang_vel}")
         # print(f"estimator {estimator_types[i]} keys={data_est.keys()}")
 
     # Skipping datapoints for faster plotting performance
@@ -652,6 +652,7 @@ def list2array(data: dict[str, list]) -> dict[str, NDArray]:
         data[k] = np.array(data[k])
     return data
 
+
 def cov2array(data: dict[str, list]) -> dict[str, NDArray]:
     """TODO."""
     if len(data["covariance"]) > 0:
@@ -690,7 +691,7 @@ def quat2axis_angle(q1, q2):
     return angle, axis
 
 
-def quat2angvel(quat, times):
+def quat2ang_vel(quat, times):
     """Computes the angular velocity in 3D given a quaternion time series."""  #
     q1 = quat
     q2 = np.roll(quat, 1, axis=0)
@@ -698,11 +699,11 @@ def quat2angvel(quat, times):
     print(np.mean(dt))
     angle, axis = quat2axis_angle(q1, q2)
     print(angle)
-    angvel = (angle / dt)[..., None] * axis
-    return angvel
+    ang_vel = (angle / dt)[..., None] * axis
+    return ang_vel
 
 
-def dquat2angvel(quat, dquat, dt):
+def dquat2ang_vel(quat, dquat, dt):
     # see https://ahrs.readthedocs.io/en/latest/filters/angular.html
     # Get both rotations and their difference
     q_delta = R.from_quat(quat + dquat) * R.from_quat(quat).inv()
@@ -716,10 +717,10 @@ def dquat2angvel(quat, dquat, dt):
     else:
         axis = np.array([1, 0, 0])  # Default axis if too small
 
-    angvel = (angle / dt)[..., None] * axis
+    ang_vel = (angle / dt)[..., None] * axis
 
-    return angvel
-    # return R.from_quat(quat).apply(angvel)  # RPY rates
+    return ang_vel
+    # return R.from_quat(quat).apply(ang_vel)  # RPY rates
 
 
 def rmse(error_array):

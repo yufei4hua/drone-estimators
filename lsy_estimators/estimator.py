@@ -126,7 +126,7 @@ class KalmanFilter(Estimator):
             dt=dt,
         )
         # Q = self.create_Q(
-        #     dim_x=dim_x, varQ_pos=1e-6, varQ_quat=1e-6, varQ_vel=1e-3, varQ_angvel=1e-2, dt=dt
+        #     dim_x=dim_x, varQ_pos=1e-6, varQ_quat=1e-6, varQ_vel=1e-3, varQ_ang_vel=1e-2, dt=dt
         # )
         # R = self.create_R(dim_z=dim_z, varR_pos=1e-8, varR_quat=3e-6, dt=dt)
 
@@ -164,7 +164,7 @@ class KalmanFilter(Estimator):
         """Creates sophisticated covariance matrices based on a paper.
 
         We assume that the linear elements (pos, vel) are correlated
-        and the rotational elements (quat, angvel) are.
+        and the rotational elements (quat, ang_vel) are.
         For more information consult the filterpy library.
         """
         ### Set process noise covariance (tunable). Uncertainty in the dynamics. High Q -> less trust in model
@@ -182,17 +182,17 @@ class KalmanFilter(Estimator):
         Q[7:10, 0:3] = Q_xyz[3:6, 0:3]  # pos <-> vel
 
         # Rotational equations
-        # since quat and angvel have different length, it's a little more tricky
+        # since quat and ang_vel have different length, it's a little more tricky
         Q_rot = Q_discrete_white_noise(
             dim=2, dt=dt, var=varQ_quat, block_size=3, order_by_dim=False
-        )  # quat & angvel
+        )  # quat & ang_vel
         Q[3:5, 3:5] = Q_rot[0:2, 0:2]  # quat12
         Q[5:7, 5:7] = Q_rot[0:2, 0:2]  # quat34
-        Q[10:13, 10:13] = Q_rot[3:6, 3:6]  # angvel
-        # We know that all quat_dot dependent on all angvel
+        Q[10:13, 10:13] = Q_rot[3:6, 3:6]  # ang_vel
+        # We know that all quat_dot dependent on all ang_vel
         # => fill in the whole 4x3 and 3x4 matrix blocks with the variance
-        Q[3:7, 10:13] = Q_rot[0, 3]  # quat <-> angvel
-        Q[10:13, 3:7] = Q_rot[3, 0]  # quat <-> angvel
+        Q[3:7, 10:13] = Q_rot[0, 3]  # quat <-> ang_vel
+        Q[10:13, 3:7] = Q_rot[3, 0]  # quat <-> ang_vel
 
         i = 13  # for keeping how big the state (index) is
 
@@ -208,10 +208,10 @@ class KalmanFilter(Estimator):
             Q[i : i + 4, 7:10] = Q_forces[1, 0]  # forces <-> vel
             Q[10:13, i : i + 4] = (
                 Q_forces[0, 1] * 0.04
-            )  # forces <-> angvel, times arm length (F=rxl)
+            )  # forces <-> ang_vel, times arm length (F=rxl)
             Q[i : i + 4, 10:13] = (
                 Q_forces[1, 0] * 0.04
-            )  # forces <-> angvel, times arm length (F=rxl)
+            )  # forces <-> ang_vel, times arm length (F=rxl)
             # Q[i : i + 4] *= varQ_forces_motor  # TODO move index as in dataclass example and make optional
             i = i + 4
 
@@ -237,7 +237,7 @@ class KalmanFilter(Estimator):
         varQ_pos: float,
         varQ_quat: float,
         varQ_vel: float,
-        varQ_angvel: float,
+        varQ_ang_vel: float,
         dt: float,
         varQ_forces_motor: float = 1e-1,
         varQ_forces_dist: float = 1e-9,
@@ -248,7 +248,7 @@ class KalmanFilter(Estimator):
         Q[0:3] *= varQ_pos
         Q[3:7] *= varQ_quat
         Q[7:10] *= varQ_vel
-        Q[10:13] *= varQ_angvel
+        Q[10:13] *= varQ_ang_vel
         i = 13
         if self.data.forces_motor is not None:
             Q[i : i + 4] *= varQ_forces_motor

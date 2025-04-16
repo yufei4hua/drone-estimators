@@ -76,7 +76,7 @@ def create_pose(time_stamp: float, drone: str, pos: Array, quat: Array) -> PoseS
     return pose
 
 
-def create_twist(time_stamp: float, drone: str, vel: Array, angvel: Array) -> TwistStamped:
+def create_twist(time_stamp: float, drone: str, vel: Array, ang_vel: Array) -> TwistStamped:
     """Creates a TwistStamped based on velocity and angular velocity."""
     twist = TwistStamped()
     sec, nsec = time2sec_nsec(time_stamp)
@@ -86,9 +86,9 @@ def create_twist(time_stamp: float, drone: str, vel: Array, angvel: Array) -> Tw
     twist.twist.linear.x = vel[0]
     twist.twist.linear.y = vel[1]
     twist.twist.linear.z = vel[2]
-    twist.twist.angular.x = angvel[0]
-    twist.twist.angular.y = angvel[1]
-    twist.twist.angular.z = angvel[2]
+    twist.twist.angular.x = ang_vel[0]
+    twist.twist.angular.y = ang_vel[1]
+    twist.twist.angular.z = ang_vel[2]
 
     return twist
 
@@ -142,7 +142,7 @@ def append_state(data: defaultdict[str, list], time: float, state: UKFData):
     data["pos"].append(state.pos)
     data["quat"].append(state.quat)
     data["vel"].append(state.vel)
-    data["ang_vel"].append(state.angvel)
+    data["ang_vel"].append(state.ang_vel)
     data["covariance"].append(state.covariance)
     if state.forces_motor is not None:
         data["forces_motor"].append(state.forces_motor)

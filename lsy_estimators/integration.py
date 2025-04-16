@@ -14,15 +14,15 @@ if TYPE_CHECKING:
 
 
 def integrate_UKFData(state: UKFData, state_dot: UKFData) -> UKFData:
-    next_pos, next_quat, next_vel, next_angvel, next_forces_motor = _integrate(
+    next_pos, next_quat, next_vel, next_ang_vel, next_forces_motor = _integrate(
         state.pos,
         state.quat,
         state.vel,
-        state.angvel,
+        state.ang_vel,
         state_dot.pos,
         state_dot.quat,
         state_dot.vel,
-        state_dot.angvel,
+        state_dot.ang_vel,
         state.dt,
         state.forces_motor,
         state_dot.forces_motor,
@@ -33,7 +33,7 @@ def integrate_UKFData(state: UKFData, state_dot: UKFData) -> UKFData:
         pos=next_pos,
         quat=next_quat,
         vel=next_vel,
-        angvel=next_angvel,
+        ang_vel=next_ang_vel,
         forces_motor=next_forces_motor,
     )
 
@@ -42,11 +42,11 @@ def _integrate(
     pos: NDArray,
     quat: NDArray,
     vel: NDArray,
-    angvel: NDArray,
+    ang_vel: NDArray,
     pos_dot: NDArray,
     quat_dot: NDArray,
     vel_dot: NDArray,
-    angvel_dot: NDArray,
+    ang_vel_dot: NDArray,
     dt: float,
     forces_motor: NDArray | None = None,
     forces_motor_dot: NDArray | None = None,
@@ -68,11 +68,11 @@ def _integrate(
         The next position, quaternion, velocity, and roll, pitch, and yaw rates of the drone.
     """
     next_pos = pos + pos_dot * dt
-    next_quat = (R.from_quat(quat) * R.from_rotvec(angvel * dt)).as_quat()
+    next_quat = (R.from_quat(quat) * R.from_rotvec(ang_vel * dt)).as_quat()
     next_vel = vel + vel_dot * dt
-    next_angvel = angvel + angvel_dot * dt
+    next_ang_vel = ang_vel + ang_vel_dot * dt
     next_forces_motor = None
     if forces_motor is not None:
         next_forces_motor = forces_motor + forces_motor_dot * dt
 
-    return next_pos, next_quat, next_vel, next_angvel, next_forces_motor
+    return next_pos, next_quat, next_vel, next_ang_vel, next_forces_motor

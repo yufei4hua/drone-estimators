@@ -102,6 +102,9 @@ class StateEstimator(object):
         # correction step, we use the accumulated time step size to correct with the
         # correct dt.
         self.dt += dt
+        return UKFData.create(
+            self.pos, np.array(np.roll(self.quat, -1)).astype(float), self.vel, self.omega_b
+        )
 
     def correct(self, pos, quat, command=None):
         """This function is not part of the legacy estimator and only for compatability."""

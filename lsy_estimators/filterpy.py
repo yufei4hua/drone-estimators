@@ -40,18 +40,18 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     data_sigmas = UKFData.from_state_array(data, sigmas)
 
     # Pass sigma points through dynamics
-    pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot = settings.fx(
+    pos_dot, quat_dot, vel_dot, ang_vel_dot, forces_motor_dot = settings.fx(
         pos=data_sigmas.pos,
         quat=data_sigmas.quat,
         vel=data_sigmas.vel,
-        angvel=data_sigmas.angvel,
+        ang_vel=data_sigmas.ang_vel,
         forces_motor=data_sigmas.forces_motor,
         forces_dist=data_sigmas.forces_dist,
         torques_dist=data_sigmas.torques_dist,
         command=data.u,
     )
-    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot)
-    # print(f"derivatives: {data_sigmas_dot.angvel}")
+    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, ang_vel_dot, forces_motor_dot)
+    # print(f"derivatives: {data_sigmas_dot.ang_vel}")
     # sigmas_dot = QuadrotorState.as_array(sigma_states_dot)
 
     # print(f"function call = {(t2 - t1) * 1000}ms, as_array = {(t3 - t2) * 1000}ms")
@@ -82,7 +82,7 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
         pos=data_sigmas_f.pos,
         quat=data_sigmas_f.quat,
         vel=data_sigmas_f.vel,
-        angvel=data_sigmas_f.angvel,
+        ang_vel=data_sigmas_f.ang_vel,
         forces_motor=data_sigmas_f.forces_motor,
         forces_dist=data_sigmas_f.forces_dist,
         torques_dist=data_sigmas_f.torques_dist,
@@ -133,18 +133,18 @@ def ukf_predict(data: UKFData, settings: UKFSettings) -> UKFData:
     data_sigmas = UKFData.from_state_array(data, sigmas)
 
     # Pass sigma points through dynamics
-    pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot = settings.fx(
+    pos_dot, quat_dot, vel_dot, ang_vel_dot, forces_motor_dot = settings.fx(
         pos=data_sigmas.pos,
         quat=data_sigmas.quat,
         vel=data_sigmas.vel,
-        angvel=data_sigmas.angvel,
+        ang_vel=data_sigmas.ang_vel,
         forces_motor=data_sigmas.forces_motor,
         forces_dist=data_sigmas.forces_dist,
         torques_dist=data_sigmas.torques_dist,
         command=data.u,
     )
-    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, angvel_dot, forces_motor_dot)
-    # print(f"derivatives: {data_sigmas_dot.angvel}")
+    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, ang_vel_dot, forces_motor_dot)
+    # print(f"derivatives: {data_sigmas_dot.ang_vel}")
     # sigmas_dot = QuadrotorState.as_array(sigma_states_dot)
 
     # print(f"function call = {(t2 - t1) * 1000}ms, as_array = {(t3 - t2) * 1000}ms")
