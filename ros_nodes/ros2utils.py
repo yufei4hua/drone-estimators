@@ -4,16 +4,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import lsy_models.utils.rotation as R
 import numpy as np
-from geometry_msgs.msg import PoseStamped, TransformStamped, TwistStamped, WrenchStamped
+from geometry_msgs.msg import Point, PoseStamped, TransformStamped, TwistStamped, WrenchStamped
 from std_msgs.msg import Float64MultiArray
+from visualization_msgs.msg import Marker, MarkerArray
 
 if TYPE_CHECKING:
     from collections import defaultdict
 
     from jax import Array as JaxArray
     from numpy.typing import NDArray
-    from rclpy.time import Time
     from std_msgs.msg import Header
     from torch import Tensor
 
@@ -53,6 +54,7 @@ def tf2array(tf: TransformStamped) -> tuple[Header, Array, Array]:
 
 
 def time2sec_nsec(t: float) -> tuple[int, int]:
+    """Converts time as float into time as sec and nsec for ROS."""
     sec = int(t)
     nsec = int(1e9 * (t - sec))
     return sec, nsec
@@ -134,6 +136,112 @@ def create_wrench(
         wrench.wrench.torque.z = 0.0
 
     return wrench
+
+
+def make_arrow_marker_from_vector(
+    id: int,
+    ns: str,
+    start_pos: Array,
+    vector: Array,
+    color_rgba: Array = [1, 1, 1, 1],
+    scale: float = 1.0,
+) -> Marker:
+    """TODO."""
+    marker = Marker()
+    marker.id = id
+    marker.ns = ns
+    marker.header.frame_id = "world"
+    marker.type = Marker.ARROW
+    marker.action = Marker.ADD
+
+    # Arrow from start_pos to start_pos + vector * scale
+    start = Point()
+    start.x = start_pos[0]
+    start.y = start_pos[1]
+    start.z = start_pos[2]
+
+    end = Point()
+    end.x = start.x + vector[0] * scale
+    end.y = start.y + vector[1] * scale
+    end.z = start.z + vector[2] * scale
+
+    marker.points = [start, end]
+
+    marker.scale.x = 0.01  # shaft diameter
+    marker.scale.y = 0.05  # head diameter
+    marker.scale.z = 0.05  # head length
+
+    marker.color.r = color_rgba[0]
+    marker.color.g = color_rgba[1]
+    marker.color.b = color_rgba[2]
+    marker.color.a = color_rgba[3]
+    if np.linalg.norm(vector) < 0.1:
+        marker.color.a = 0
+
+    return marker
+
+
+def create_marker_array(
+    time_stamp: float,
+    drone: str,
+    pos: Array,
+    quat: Array,
+    vel: Array,
+    ang_vel: Array,
+    force: Array | None,
+    torque: Array | None,
+) -> MarkerArray:
+    """Creates a MarkerArray for visualization in RViz."""
+    marker_array = MarkerArray()
+
+    ### Drone marker
+    marker = Marker()
+    sec, nsec = time2sec_nsec(time_stamp)
+    marker.header.stamp.sec = sec
+    marker.header.stamp.nanosec = nsec
+    marker.header.frame_id = "world"
+    marker.pose.position.x = pos[0]
+    marker.pose.position.y = pos[1]
+    marker.pose.position.z = pos[2]
+    marker.pose.orientation.x = quat[0]
+    marker.pose.orientation.y = quat[1]
+    marker.pose.orientation.z = quat[2]
+    marker.pose.orientation.w = quat[3]
+
+    marker.ns = "drone"
+    marker.id = 0
+    marker.type = Marker.MESH_RESOURCE
+    marker.action = Marker.ADD
+    marker.scale.x = marker.scale.y = marker.scale.z = 1.0
+    marker.color.r = marker.color.g = marker.color.b = 1.0
+    marker.color.a = 1.0
+    marker.mesh_resource = "package://motion_capture_tracking/meshes/crazyflie2.dae"
+    marker.mesh_use_embedded_materials = True
+    marker_array.markers.append(marker)
+
+    ### Velocity Marker
+    marker_array.markers.append(
+        make_arrow_marker_from_vector(1, "twist", pos, vel, [1.0, 0.0, 0.0, 1.0])
+    )
+
+    ### Angular Velocity Marker
+    rot = R.from_quat(quat)
+    ang_vel = rot.apply(ang_vel)  # Rotating the vector same as the done to be displayed correctly
+    marker_array.markers.append(
+        make_arrow_marker_from_vector(2, "twist", pos, ang_vel, [1.0, 1.0, 0.0, 1.0])
+    )
+
+    ### Force Marker
+    marker_array.markers.append(
+        make_arrow_marker_from_vector(3, "wrench", pos, force, [0.0, 0.0, 1.0, 1.0])
+    )
+
+    ### Torque Marker
+    marker_array.markers.append(
+        make_arrow_marker_from_vector(4, "wrench", pos, torque, [1.0, 0.0, 1.0, 1.0])
+    )
+
+    return marker_array
 
 
 def append_state(data: defaultdict[str, list], time: float, state: UKFData):

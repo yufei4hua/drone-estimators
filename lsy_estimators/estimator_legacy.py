@@ -122,7 +122,8 @@ class StateEstimator(object):
 
     def set_state(self, pos, quat):
         """This function is not part of the legacy estimator and only for compatability."""
-        pass
+        self.pos = pos
+        self.quat = np.roll(quat, 1)
 
     def get_new_measurement(self, position, quaternion):
         """Get a new measurement of position and orientation.

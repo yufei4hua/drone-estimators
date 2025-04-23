@@ -12,13 +12,11 @@ from lsy_models.utils.constants import Constants
 
 from lsy_estimators.filterpy import (
     Q_discrete_white_noise,
-    SigmaPointsSettings,
-    UKFData,
-    UKFSettings,
     ukf_correct,
     ukf_predict,
     ukf_predict_correct,
 )
+from lsy_estimators.structs import SigmaPointsSettings, UKFData, UKFSettings
 
 if TYPE_CHECKING:
     from jax import Array as JaxArray

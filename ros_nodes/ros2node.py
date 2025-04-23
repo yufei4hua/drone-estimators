@@ -29,11 +29,13 @@ from munch import Munch, munchify
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Float64MultiArray
 from tf2_msgs.msg import TFMessage
+from visualization_msgs.msg import MarkerArray
 
 from lsy_estimators.estimator import KalmanFilter
 from lsy_estimators.estimator_legacy import StateEstimator
 from ros_nodes.ros2utils import (
     create_array,
+    create_marker_array,
     create_pose,
     create_twist,
     create_wrench,
@@ -160,6 +162,21 @@ class MPEstimator:
                     f"Estimator type {self.settings.estimator_type} not implemented."
                 )
 
+        # Initialization
+        self.logger.info("Ẁaiting for initial measurement.")
+        while not self._shutdown.is_set():
+            with self._tf_msg_buffer.get_lock():
+                data = np.asarray(self._tf_msg_buffer, dtype=np.float64, copy=True)
+                self._tf_msg_buffer[0] = 0
+            n_tf_msg, tf_timestamp, pos, quat = data[0], data[1], data[2:5], data[5:]
+
+            if n_tf_msg >= 1:
+                self.time_stamp_last_prediction = tf_timestamp
+                self.time_stamp_last_correction = tf_timestamp
+                self.estimator.set_state(pos, quat)
+                self.logger.info("Initialized pos and quat.")
+                break
+
         self.logger.info(f"Started estimator (process {os.getpid()})")
 
     def run(self):
@@ -170,6 +187,8 @@ class MPEstimator:
         global_time = time.perf_counter()
 
         try:
+            # self.logger.info(f"{self.estimator.data.pos=}")
+            # Estimation loop
             while not self._shutdown.is_set():
                 current_time = time.time()
 
@@ -185,6 +204,7 @@ class MPEstimator:
                 if n_cmd_messages >= 1 and self.input_needed:
                     # The command is as it is sent to the drone, meaning for attitude interface:
                     # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
+                    # All the models run with rad and N, so we need to convert the RPYT command
                     cmd[..., -1] = cf2.pwm2force(cmd[..., -1], self.estimator.constants)
                     cmd[..., :-1] = np.deg2rad(cmd[..., :-1])
                     self.estimator.set_input(cmd)  # TODO # compare times?
@@ -197,10 +217,12 @@ class MPEstimator:
                     dt = tf_timestamp - self.time_stamp_last_prediction
                     self.time_stamp_last_prediction = tf_timestamp
                     self.estimator.predict(dt)
-                    self.estimator.correct(pos, quat, dt)
+                    # print(f"MEASUREMENT {pos=}, {quat=}")
+                    self.estimator.correct(pos, quat)
 
                 dt = current_time - self.time_stamp_last_prediction
                 data = self.estimator.predict(dt)
+                # self.logger.info(f"{data.pos=}, {data.quat=}, {data.vel=}, {data.ang_vel=}, ")
                 self.time_stamp_last_prediction = current_time
                 with self._pose_buffer.get_lock():
                     self._pose_buffer[:3] = data.pos
@@ -219,7 +241,7 @@ class MPEstimator:
                 self._publish_update.set()
                 remaining = (
                     (1 / self.frequency) - (time.time() - current_time) - 1.25 * 1e-4
-                )  # TODO remove magic number
+                )  # TODO remove magic number, replace with "controller"
                 if k % 1000 == 0:
                     self.logger.info(f"Freq: {k / (time.perf_counter() - global_time)}")
                 k += 1
@@ -324,6 +346,10 @@ class MPEstimator:
         pub_wrench = node.create_publisher(
             WrenchStamped, f"/drones/{drone_name}/estimate/wrench", qos_profile=qos_profile
         )
+        # marker (only for rviz)
+        pub_markers = node.create_publisher(
+            MarkerArray, f"/drones/{drone_name}/estimate/marker_array", qos_profile=qos_profile
+        )
         signal.signal(signal.SIGINT, lambda c, _: shutdown.set())  # Gracefully handle Ctrl-C
         startup.wait(10.0)  # Register this process as ready for startup barrier
 
@@ -350,6 +376,18 @@ class MPEstimator:
             wrench = np.asarray(wrench_buffer, dtype=np.float64, copy=True)
             wrench_stamped = create_wrench(time_stamp, drone_name, wrench[:3], wrench[3:])
             pub_wrench.publish(wrench_stamped)
+
+            markers = create_marker_array(
+                time_stamp,
+                drone_name,
+                pose[:3],
+                pose[3:],
+                twist[:3],
+                twist[3:],
+                wrench[:3],
+                wrench[3:],
+            )
+            pub_markers.publish(markers)
 
         pub_pose.destroy()
         pub_twist.destroy()

@@ -17,14 +17,13 @@ for more information.
 
 from __future__ import absolute_import, annotations, division, print_function
 
-import time
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.linalg import block_diag
 
 from lsy_estimators.integration import integrate_UKFData
-from lsy_estimators.structs import SigmaPointsSettings, UKFData, UKFSettings
+from lsy_estimators.structs import UKFData, UKFSettings
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -66,6 +65,20 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     # data = data.replace(sigmas_f=sigmas_f)
     data_sigmas_f = integrate_UKFData(data_sigmas, data_sigmas_dot)
     sigmas_f = UKFData.as_state_array(data_sigmas_f)
+    data = data.replace(sigmas_f=sigmas_f)
+
+    # Pass prior sigmas through measurment function h(x,u,dt) to get measurement sigmas
+    sigmas_h = settings.hx(
+        pos=data_sigmas_f.pos,
+        quat=data_sigmas_f.quat,
+        vel=data_sigmas_f.vel,
+        ang_vel=data_sigmas_f.ang_vel,
+        command=data.u,
+        forces_motor=data_sigmas_f.forces_motor,
+        forces_dist=data_sigmas_f.forces_dist,
+        torques_dist=data_sigmas_f.torques_dist,
+    )
+    data = data.replace(sigmas_h=sigmas_h)
 
     # Compute prior with unscented transform
     x, P = ukf_unscented_transform(
@@ -73,34 +86,22 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     )
 
     # save prior
-    # data = data.replace(x=x, covariance=P)
+    data = UKFData.from_state_array(data, x)
+    data = data.replace(covariance=P)
 
     #### Correct
-    # Pass prior sigmas through measurment function h(x,u,dt) to get measurement sigmas
-    # sigmas_h = settings.hx(sigmas_f, data.u, data.dt)
-    sigmas_h = settings.hx(
-        pos=data_sigmas_f.pos,
-        quat=data_sigmas_f.quat,
-        vel=data_sigmas_f.vel,
-        ang_vel=data_sigmas_f.ang_vel,
-        forces_motor=data_sigmas_f.forces_motor,
-        forces_dist=data_sigmas_f.forces_dist,
-        torques_dist=data_sigmas_f.torques_dist,
-        command=data.u,
-    )
-    # sigmas_h = sigmas_f[..., :7]  # TODO replace this Ghetto version with hx
-    # data = data.replace(sigmas_h=sigmas_h)
-
     # Pass mean and covariance of prediction through unscented transform
     zp, S = ukf_unscented_transform(
-        sigmas_h, settings.SPsettings.Wm, settings.SPsettings.Wc, settings.R
+        data.sigmas_h, settings.SPsettings.Wm, settings.SPsettings.Wc, settings.R
     )
     # SI = xp.linalg.inv(data.S)
     # data = data.replace(S=S, SI=SI)
     # data = data.replace(S=S)
 
     # compute cross variance
-    Pxz = ukf_cross_variance(x, zp, sigmas_f, sigmas_h, settings.SPsettings.Wc)
+    Pxz = ukf_cross_variance(
+        UKFData.as_state_array(data), zp, data.sigmas_f, data.sigmas_h, settings.SPsettings.Wc
+    )
     # K = xp.dot(Pxz, data.SI)       # Kalman gain
     # K @ S = Pxz => K = Pxz @ S^-1 => or: S.T @ K.T = Pxz.T
     K = xp.linalg.solve(S.T, Pxz.T).T
@@ -108,11 +109,11 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     # data = data.replace(K=K, y=y)
 
     # Update Gaussian state estimate (x, P)
-    x = x + xp.dot(K, y)
+    x = UKFData.as_state_array(data) + xp.dot(K, y)
     # print(f"P prior = {xp.diag(P)}")
     # print(f"P prior = \n{P}")
     # Added identity for numerical stability
-    P = P - xp.dot(K, xp.dot(S, K.T))  # + xp.eye(P.shape[0]) * 1e-9
+    P = data.covariance - xp.dot(K, xp.dot(S, K.T))  # + xp.eye(P.shape[0]) * 1e-9
     # print(f"P post = {xp.diag(P)}")
     # print(f"P post = \n{P}")
 
@@ -175,32 +176,36 @@ def ukf_predict(data: UKFData, settings: UKFSettings) -> UKFData:
 def ukf_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     """TODO."""
     xp = data.covariance.__array_namespace__()
-    # Pass prior sigmas through measurment function h(x,u,dt) to get measurement sigmas
-    sigmas_h = settings.hx(data.sigmas_f, data.u, data.dt)
-    data = data.replace(sigmas_h=sigmas_h)
-
     # Pass mean and covariance of prediction through unscented transform
     zp, S = ukf_unscented_transform(
         data.sigmas_h, settings.SPsettings.Wm, settings.SPsettings.Wc, settings.R
     )
     # SI = xp.linalg.inv(data.S)
     # data = data.replace(S=S, SI=SI)
-    data = data.replace(S=S)
+    # data = data.replace(S=S)
 
     # compute cross variance
-    Pxz = ukf_cross_variance(data.x, zp, data.sigmas_f, data.sigmas_h, settings.SPsettings.Wc)
+    Pxz = ukf_cross_variance(
+        UKFData.as_state_array(data), zp, data.sigmas_f, data.sigmas_h, settings.SPsettings.Wc
+    )
     # K = xp.dot(Pxz, data.SI)       # Kalman gain
     # K @ S = Pxz => K = Pxz @ S^-1 => or: S.T @ K.T = Pxz.T
     K = xp.linalg.solve(S.T, Pxz.T).T
     y = xp.subtract(data.z, zp)  # residual
-    data = data.replace(K=K, y=y)
+    # data = data.replace(K=K, y=y)
 
     # Update Gaussian state estimate (x, P)
-    x = data.x + xp.dot(data.K, data.y)
-    P = data.P - xp.dot(data.K, xp.dot(data.S, data.K.T))
+    x = UKFData.as_state_array(data) + xp.dot(K, y)
+    # print(f"P prior = {xp.diag(P)}")
+    # print(f"P prior = \n{P}")
+    # Added identity for numerical stability
+    P = data.covariance - xp.dot(K, xp.dot(S, K.T))  # + xp.eye(P.shape[0]) * 1e-9
+    # print(f"P post = {xp.diag(P)}")
+    # print(f"P post = \n{P}")
 
-    # Safe posterior
-    data = data.replace(x=x, P=P, x_post=x, P_post=P)
+    # Save posterior
+    data = UKFData.from_state_array(data, x)
+    data = data.replace(covariance=P)
 
     return data
 

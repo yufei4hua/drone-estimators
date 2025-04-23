@@ -26,7 +26,16 @@ save_data = false # store the raw data and estimates into pickle files
 # estimate_forces_dist = true
 # estimate_torques_dist = true
 
-[estimator3]
+# [estimator3]
+# estimator_type = "ukf"
+# drone_name = "cf52"
+# drone_config = "cf2x_L250"
+# dynamics_model = "fitted_DI_rpy"
+# estimate_forces_motor = false
+# estimate_forces_dist = false
+# estimate_torques_dist = false
+
+[estimator4]
 estimator_type = "legacy"
 drone_name = "cf52"
 drone_config = "cf2x_L250"
@@ -34,12 +43,3 @@ dynamics_model = "fitted_DI_rpy"
 estimate_forces_motor = false
 estimate_forces_dist = true
 estimate_torques_dist = true
-
-# [estimator4]
-# estimator_type = "legacy"
-# drone_name = "cf52"
-# drone_config = "cf2x_L250"
-# dynamics_model = "fitted_DI_rpy"
-# estimate_forces_motor = false
-# estimate_forces_dist = true
-# estimate_torques_dist = true

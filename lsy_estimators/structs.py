@@ -28,6 +28,9 @@ class UKFData:
     torques_dist: Array | None
     covariance: Array  # Covariance matrix
 
+    sigmas_f: Array
+    sigmas_h: Array
+
     u: Array  # input
     z: Array  # measurement
     dt: float
@@ -65,12 +68,27 @@ class UKFData:
 
         covariance = np.eye(dim_x)
 
+        sigmas_f = np.zeros((2 * dim_x + 1, dim_x))
+        sigmas_h = np.zeros((2 * dim_x + 1, dim_z))
+
         u = np.zeros(dim_u)  # input
         z = np.zeros(dim_z)  # measurement
         dt = 1
 
         return cls(
-            pos, quat, vel, ang_vel, forces_motor, forces_dist, torques_dist, covariance, u, z, dt
+            pos,
+            quat,
+            vel,
+            ang_vel,
+            forces_motor,
+            forces_dist,
+            torques_dist,
+            covariance,
+            sigmas_f,
+            sigmas_h,
+            u,
+            z,
+            dt,
         )
 
     @classmethod
@@ -95,12 +113,27 @@ class UKFData:
 
         covariance = np.eye(dim_x)
 
+        sigmas_f = np.zeros((2 * dim_x + 1, dim_x))
+        sigmas_h = np.zeros((2 * dim_x + 1, 7))
+
         u = np.zeros(4)  # input
         z = np.zeros(7)  # measurement
         dt = 1
 
         return cls(
-            pos, quat, vel, ang_vel, forces_motor, forces_dist, torques_dist, covariance, u, z, dt
+            pos,
+            quat,
+            vel,
+            ang_vel,
+            forces_motor,
+            forces_dist,
+            torques_dist,
+            covariance,
+            sigmas_f,
+            sigmas_h,
+            u,
+            z,
+            dt,
         )
 
     @classmethod
