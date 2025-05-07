@@ -1,0 +1,27 @@
+# Simly add your estimators as shown below
+
+# Supported types: legacy, ukf
+# Supported models: See lsy_models.models.available_models, i.e. fitted_DI_rpy, mellinger_rpyt
+
+[global] # TODO rename to global
+frequency = 300   # frequency of the estimator. This should be >= Vicon frequency
+timings = true    # print the timings of each estimator
+save_data = false # store the raw data and estimates into pickle files
+
+[estimator1]
+estimator_type = "ukf"
+drone_name = "cf52"
+drone_config = "cf2x_L250"
+dynamics_model = "fitted_DI_D_rpyt"
+estimate_forces_motor = true
+estimate_forces_dist = true
+estimate_torques_dist = false
+
+# [estimator2]
+# estimator_type = "ukf"
+# drone_name = "cf99"
+# drone_config = "cf2x_L250"
+# dynamics_model = "fitted_DI_DD_rpyt"
+# estimate_forces_motor = true
+# estimate_forces_dist = true
+# estimate_torques_dist = true
