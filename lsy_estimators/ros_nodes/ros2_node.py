@@ -38,6 +38,7 @@ from lsy_models.utils import cf2
 from munch import Munch, munchify
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from std_msgs.msg import Float64MultiArray
+from std_srvs.srv import Trigger
 from tf2_msgs.msg import TFMessage
 from visualization_msgs.msg import MarkerArray
 
@@ -324,6 +325,13 @@ class MPEstimator:
                 _cmd_msg_buffer[1] = time.time()
                 _cmd_msg_buffer[2:] = msg.data
 
+        def calibration_callback(self, request, response):
+            self.get_logger().info("Trigger service called.")
+            # Do some action here
+            response.success = True
+            response.message = "Action completed successfully."
+            return response
+
         sub_tf = node.create_subscription(TFMessage, "/tf", tf_callback, qos_profile=qos_profile)
         sub_cmd = node.create_subscription(
             Float64MultiArray,
@@ -331,12 +339,16 @@ class MPEstimator:
             cmd_callback,
             qos_profile=qos_profile,
         )
+        sub_calib = node.create_client(
+            Trigger, f"/drones/{drone_name}/calibration", calibration_callback
+        )
         startup.wait(10.0)  # Register this process as ready for startup barrier
 
         while not shutdown.is_set():
             rclpy.spin_once(node, timeout_sec=0.1)
         sub_tf.destroy()
         sub_cmd.destroy()
+        sub_calib.destroy()
         node.destroy_node()
 
     @staticmethod
