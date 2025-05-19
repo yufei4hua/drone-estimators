@@ -234,12 +234,12 @@ def create_marker_array(
 
     ### Force Marker
     marker_array.markers.append(
-        make_arrow_marker_from_vector(3, "wrench", pos, force * 10, [0.0, 0.0, 1.0, 1.0])
+        make_arrow_marker_from_vector(3, "wrench", pos, force * 5, [0.0, 0.0, 1.0, 1.0])
     )
 
     ### Torque Marker
     marker_array.markers.append(
-        make_arrow_marker_from_vector(4, "wrench", pos, torque * 10, [1.0, 0.0, 1.0, 1.0])
+        make_arrow_marker_from_vector(4, "wrench", pos, torque * 5, [1.0, 0.0, 1.0, 1.0])
     )
 
     return marker_array
