@@ -34,19 +34,19 @@ import rclpy
 import toml
 
 # Message types: https://docs.ros2.org/foxy/api/geometry_msgs/index-msg.html
+from drone_models.transform import pwm2force
 from geometry_msgs.msg import PoseStamped, TwistStamped, WrenchStamped
-from lsy_models.utils import cf2
-from lsy_models.utils import rotation as R
 from munch import Munch, munchify
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from scipy.spatial.transform import Rotation as R
 from std_msgs.msg import Float64MultiArray
 from std_srvs.srv import Trigger
 from tf2_msgs.msg import TFMessage
 from visualization_msgs.msg import MarkerArray
 
-from lsy_estimators.estimator import KalmanFilter
-from lsy_estimators.estimator_legacy import StateEstimator
-from lsy_estimators.ros_nodes.ros2_utils import (
+from drone_estimators.estimator import KalmanFilter
+from drone_estimators.estimator_legacy import StateEstimator
+from drone_estimators.ros_nodes.ros2_utils import (
     append_measurement,
     append_state,
     create_array,
@@ -226,7 +226,11 @@ class MPEstimator:
                     # The command is as it is sent to the drone, meaning for attitude interface:
                     # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
                     # All the models run with rad and N, so we need to convert the RPYT command
-                    cmd[..., -1] = cf2.pwm2force(cmd[..., -1], self.estimator.constants)
+                    cmd[..., -1] = pwm2force(
+                        cmd[..., -1],
+                        self.estimator.constants.THRUST_MAX * 4,
+                        self.estimator.constants.PWM_MAX,
+                    )
                     cmd[..., :-1] = np.deg2rad(cmd[..., :-1])
                     self.estimator.set_input(cmd)  # TODO # compare times?
 
@@ -304,8 +308,10 @@ class MPEstimator:
         )
         signal.signal(signal.SIGINT, lambda c, _: shutdown.set())  # Gracefully handle Ctrl-C
 
-        last_quat = np.array([0.0, 0.0, 0.0, 1.0])
-        calibration_quat = np.array([0.0, 0.0, 0.0, 1.0])
+        # last_quat = np.array([0.0, 0.0, 0.0, 1.0])
+        # calibration_quat = np.array([0.0, 0.0, 0.0, 1.0])
+        last_rot = R.from_quat(np.array([0.0, 0.0, 0.0, 1.0]))
+        calibration_rot = R.from_quat(np.array([0.0, 0.0, 0.0, 1.0]))
 
         def tf_callback(msg: TFMessage):
             tf = find_transform(msg.transforms, drone_name)
@@ -322,14 +328,13 @@ class MPEstimator:
             # time.
             # TODO: Subtract a constant time to account for [Vicon -> ros2 pub -> ros2 sub] delay.
             time_stamp = time.time()
-            nonlocal last_quat
-            last_quat = quat
-            quat_corrected = R.quat_mult(calibration_quat, quat)  # TODO
+            nonlocal last_rot
+            last_rot = R.from_quat(quat)
             with _tf_msg_buffer.get_lock():
                 _tf_msg_buffer[0] += 1
                 _tf_msg_buffer[1] = time_stamp
                 _tf_msg_buffer[2:5] = pos
-                _tf_msg_buffer[5:9] = quat_corrected
+                _tf_msg_buffer[5:9] = (calibration_rot.inv() * last_rot).as_quat()
 
         def cmd_callback(msg: Float64MultiArray):
             # The command is as it is sent to the drone, meaning for attitude interface:
@@ -342,7 +347,7 @@ class MPEstimator:
         def calibration_callback(
             request: Trigger.Request, response: Trigger.Response
         ) -> Trigger.Response:
-            rpy = R.from_quat(last_quat).as_euler("xyz", degrees=True)
+            rpy = last_rot.as_euler("xyz", degrees=True)
             max_angle = 20  # degrees
             if np.any(rpy > max_angle):
                 node.get_logger().warning("Calibration failed.")
@@ -351,8 +356,8 @@ class MPEstimator:
                 return response
 
             node.get_logger().warning("Calibration successful.")
-            nonlocal calibration_quat
-            calibration_quat = R.quat_conj(last_quat)
+            nonlocal calibration_rot
+            calibration_rot = last_rot
             response.success = True
             response.message = "Pose calibrated successfully."
             return response

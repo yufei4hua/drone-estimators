@@ -8,11 +8,7 @@ import numpy as np
 from flax.struct import Callable, dataclass
 
 if TYPE_CHECKING:
-    from jax import Array as JaxArray
-    from numpy.typing import NDArray
-    from torch import Tensor
-
-    Array = NDArray | JaxArray | Tensor
+    from array_api_typing import Array
 
 
 @dataclass

@@ -23,11 +23,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 from scipy.linalg import block_diag
 
-from lsy_estimators.integration import integrate_UKFData
-from lsy_estimators.structs import UKFData, UKFSettings
+from drone_estimators.integration import integrate_UKFData
+from drone_estimators.structs import UKFData, UKFSettings
 
 if TYPE_CHECKING:
-    from numpy.typing import NDArray
+    from array_api_typing import Array
 
 
 # @jax.jit
@@ -207,7 +207,7 @@ def ukf_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     return data
 
 
-def ukf_calculate_sigma_points(data: UKFData, settings: UKFSettings) -> NDArray[np.floating]:
+def ukf_calculate_sigma_points(data: UKFData, settings: UKFSettings) -> Array:
     """TODO."""
     xp = data.pos.__array_namespace__()
     P = data.covariance
@@ -226,11 +226,8 @@ def ukf_calculate_sigma_points(data: UKFData, settings: UKFSettings) -> NDArray[
 
 
 def ukf_unscented_transform(
-    sigmas: NDArray[np.floating],
-    Wm: NDArray[np.floating],
-    Wc: NDArray[np.floating],
-    noise_cov: NDArray[np.floating] = None,
-) -> tuple[NDArray[np.floating], NDArray[np.floating]]:
+    sigmas: Array, Wm: Array, Wc: Array, noise_cov: Array = None
+) -> tuple[Array, Array]:
     """TODO."""
     xp = sigmas.__array_namespace__()
     x = xp.dot(Wm, sigmas)
@@ -246,13 +243,7 @@ def ukf_unscented_transform(
     return (x, P)
 
 
-def ukf_cross_variance(
-    x: NDArray[np.floating],
-    z: NDArray[np.floating],
-    sigmas_f: NDArray[np.floating],
-    sigmas_h: NDArray[np.floating],
-    Wc: NDArray[np.floating],
-) -> NDArray[np.floating]:
+def ukf_cross_variance(x: Array, z: Array, sigmas_f: Array, sigmas_h: Array, Wc: Array) -> Array:
     """Compute cross variance of the state `x` and measurement `z`."""
     xp = x.__array_namespace__()
     # The slicing brings Wc in the correct shape to be broadcast
@@ -264,7 +255,7 @@ def ukf_cross_variance(
     return Pxz
 
 
-def order_by_derivative(Q: NDArray[np.floating], dim: int, block_size: int) -> NDArray[np.floating]:
+def order_by_derivative(Q: Array, dim: int, block_size: int) -> Array:
     """TODO."""
     xp = Q.__array_namespace__()
 
@@ -284,7 +275,7 @@ def order_by_derivative(Q: NDArray[np.floating], dim: int, block_size: int) -> N
 
 def Q_discrete_white_noise(
     dim: int, dt: float = 1.0, var: float = 1.0, block_size: int = 1, order_by_dim: bool = True
-) -> NDArray[np.floating]:
+) -> Array:
     """TODO."""
     if not (dim == 2 or dim == 3 or dim == 4):
         raise ValueError("dim must be between 2 and 4")

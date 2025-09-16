@@ -4,23 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import lsy_models.utils.rotation as R
 import numpy as np
 from geometry_msgs.msg import Point, PoseStamped, TransformStamped, TwistStamped, WrenchStamped
+from scipy.spatial.transform import Rotation as R
 from std_msgs.msg import Float64MultiArray
 from visualization_msgs.msg import Marker, MarkerArray
 
 if TYPE_CHECKING:
     from collections import defaultdict
 
-    from jax import Array as JaxArray
-    from numpy.typing import NDArray
+    from array_api_typing import Array
     from std_msgs.msg import Header
-    from torch import Tensor
 
-    from lsy_estimators.structs import UKFData
-
-    Array = NDArray | JaxArray | Tensor
+    from drone_estimators.structs import UKFData
 
 
 def find_transform(

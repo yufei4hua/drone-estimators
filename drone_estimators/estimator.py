@@ -5,25 +5,20 @@ from __future__ import absolute_import, annotations, division, print_function
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
-import jax
 import numpy as np
 from lsy_models.models import dynamics_numeric, observation_function
 from lsy_models.utils.constants import Constants
 
-from lsy_estimators.filterpy import (
+from drone_estimators.filterpy import (
     Q_discrete_white_noise,
     ukf_correct,
     ukf_predict,
     ukf_predict_correct,
 )
-from lsy_estimators.structs import SigmaPointsSettings, UKFData, UKFSettings
+from drone_estimators.structs import SigmaPointsSettings, UKFData, UKFSettings
 
 if TYPE_CHECKING:
-    from jax import Array as JaxArray
-    from numpy.typing import NDArray
-    from torch import Tensor
-
-    Array = NDArray | JaxArray | Tensor
+    from array_api_typing import Array
 
 
 class Estimator(ABC):

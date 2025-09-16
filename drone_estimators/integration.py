@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from lsy_models.utils import rotation as R
+from scipy.spatial.transform import Rotation as R
 
 if TYPE_CHECKING:
-    from numpy.typing import NDArray
+    from array_api_typing import Array
 
-    from lsy_estimators.structs import UKFData
+    from drone_estimators.structs import UKFData
 
 
 def integrate_UKFData(state: UKFData, state_dot: UKFData) -> UKFData:
@@ -39,18 +39,18 @@ def integrate_UKFData(state: UKFData, state_dot: UKFData) -> UKFData:
 
 
 def _integrate(
-    pos: NDArray,
-    quat: NDArray,
-    vel: NDArray,
-    ang_vel: NDArray,
-    pos_dot: NDArray,
-    quat_dot: NDArray,
-    vel_dot: NDArray,
-    ang_vel_dot: NDArray,
+    pos: Array,
+    quat: Array,
+    vel: Array,
+    ang_vel: Array,
+    pos_dot: Array,
+    quat_dot: Array,
+    vel_dot: Array,
+    ang_vel_dot: Array,
     dt: float,
-    forces_motor: NDArray | None = None,
-    forces_motor_dot: NDArray | None = None,
-) -> NDArray:  # TODO is actually tuple
+    forces_motor: Array | None = None,
+    forces_motor_dot: Array | None = None,
+) -> Array:  # TODO is actually tuple
     """Integrate the dynamics forward in time.
 
     Args:

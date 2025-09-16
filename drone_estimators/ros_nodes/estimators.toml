@@ -1,7 +1,7 @@
 # Simly add your estimators as shown below
 
 # Supported types: legacy, ukf
-# Supported models: See lsy_models.models.available_models, i.e. fitted_DI_rpy, mellinger_rpyt
+# Supported models: See drone_models
 
 [global] # TODO rename to global
 frequency = 300   # frequency of the estimator. This should be >= Vicon frequency

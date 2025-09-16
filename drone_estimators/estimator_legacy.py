@@ -13,16 +13,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 import transforms3d as tf
 
-from lsy_estimators.structs import UKFData
+from drone_estimators.structs import UKFData
 
 if TYPE_CHECKING:
-    from jax import Array as JaxArray
-    from numpy.typing import NDArray
-    from torch import Tensor
+    from array_api_typing import Array
 
-    Array = NDArray | JaxArray | Tensor
-
-# from lsy_estimators.quaternions import apply_omega_to_quat, global_to_body, omega_from_quat_quat
+# from drone_estimators.quaternions import apply_omega_to_quat, global_to_body, omega_from_quat_quat
 
 
 class StateEstimator(object):
