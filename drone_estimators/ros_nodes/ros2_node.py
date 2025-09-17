@@ -77,6 +77,8 @@ class MPEstimator:
 
     def __init__(self, settings: Munch):
         """TODO."""
+        self.settings = settings
+
         ctx = mp.get_context("spawn")
         self._shutdown = ctx.Event()
         self._publish_update = ctx.Event()
@@ -134,15 +136,17 @@ class MPEstimator:
         self._sub_process.start()
         self._pub_process.start()
         startup.wait(10.0)
+        self.logger.info("Subscriber and Publisher process started.")
 
+    def _init_estimator(self):
         self.input_needed = False
         self.initial_observation = None
-        self.settings = settings
+
         self.time_stamp_last_prediction = 0
         self.time_stamp_last_correction = 0
         self.perf_timings = deque(maxlen=5000)
 
-        self.frequency = settings.frequency  # Hz # TODO get from vicon frequency
+        self.frequency = self.settings.frequency  # Hz # TODO get from vicon frequency
 
         self.current_header = None
         self.current_state = None
@@ -155,9 +159,9 @@ class MPEstimator:
             case "legacy":
                 self.estimator = StateEstimator((0.0001, 0.007, 0.09, 0.005, 0.07))
                 if (
-                    settings.estimate_forces_motor
-                    or settings.estimate_forces_dist
-                    or settings.estimate_torques_dist
+                    self.settings.estimate_rotor_vel
+                    or self.settings.estimate_dist_f
+                    or self.settings.estimate_dist_t
                 ):
                     self.logger.warning(
                         "Legacy estimator does not support force or torque estimation!"
@@ -166,11 +170,11 @@ class MPEstimator:
                 self.input_needed = True
                 self.estimator = KalmanFilter(
                     dt=1 / self.frequency,
-                    model=settings.dynamics_model,  # mellinger_rpyt, fitted_DI_rpy
-                    config=settings.drone_config,
-                    estimate_forces_motor=settings.estimate_forces_motor,
-                    estimate_forces_dist=settings.estimate_forces_dist,
-                    estimate_torques_dist=settings.estimate_torques_dist,
+                    model=self.settings.dynamics_model,
+                    config=self.settings.drone_config,
+                    estimate_rotor_vel=self.settings.estimate_rotor_vel,
+                    estimate_dist_f=self.settings.estimate_dist_f,
+                    estimate_dist_t=self.settings.estimate_dist_t,
                 )
             case _:
                 raise NotImplementedError(
@@ -198,8 +202,8 @@ class MPEstimator:
 
     def run(self):
         """Main estimator loop."""
-        # TODO if first measurement => init estimator
-        # self.estimator_init = False
+        self._init_estimator()  # done here such that error can be raised properly
+
         k = 0
         global_time = time.perf_counter()
 
@@ -259,14 +263,14 @@ class MPEstimator:
                 with self._twist_buffer.get_lock():
                     self._twist_buffer[:3] = estimator_data.vel
                     self._twist_buffer[3:] = estimator_data.ang_vel
-                if estimator_data.forces_motor is not None:
+                if estimator_data.rotor_vel is not None:
                     with self._forces_buffer.get_lock():
-                        self._forces_buffer[:] = estimator_data.forces_motor
-                if estimator_data.forces_dist is not None:
+                        self._forces_buffer[:] = estimator_data.rotor_vel
+                if estimator_data.dist_f is not None:
                     with self._wrench_buffer.get_lock():
-                        self._wrench_buffer[:3] = estimator_data.forces_dist
-                        if estimator_data.torques_dist is not None:
-                            self._wrench_buffer[3:] = estimator_data.torques_dist
+                        self._wrench_buffer[:3] = estimator_data.dist_f
+                        if estimator_data.dist_t is not None:
+                            self._wrench_buffer[3:] = estimator_data.dist_t
                 self._publish_update.set()
 
                 if self.settings.save_data:
@@ -278,7 +282,7 @@ class MPEstimator:
                             append_measurement(self.data_meas, tf_timestamp, pos, quat, None)
 
                 # if k % 100 == 0:
-                #     self.logger.info(f"{estimator_data.forces_dist=}")
+                #     self.logger.info(f"{estimator_data.dist_f=}")
 
                 remaining = (
                     (1 / self.frequency) - (time.time() - loop_start_time) - 1.25 * 1e-4

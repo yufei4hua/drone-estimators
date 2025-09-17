@@ -19,9 +19,9 @@ class UKFData:
     quat: Array
     vel: Array
     ang_vel: Array
-    forces_motor: Array | None
-    forces_dist: Array | None
-    torques_dist: Array | None
+    rotor_vel: Array | None
+    dist_f: Array | None
+    dist_t: Array | None
     covariance: Array  # Covariance matrix
 
     sigmas_f: Array
@@ -34,9 +34,9 @@ class UKFData:
     @classmethod
     def create_empty(
         cls,
-        forces_motor: bool = False,
-        forces_dist: bool = False,
-        torques_dist: bool = False,
+        rotor_vel: bool = False,
+        dist_f: bool = False,
+        dist_t: bool = False,
         dim_u: int = 4,
         dim_z: int = 7,
     ) -> UKFData:
@@ -46,21 +46,21 @@ class UKFData:
         vel = np.zeros(3)
         ang_vel = np.zeros(3)
         dim_x = 13
-        if forces_motor:
-            forces_motor = np.zeros(4)
+        if rotor_vel:
+            rotor_vel = np.zeros(4)
             dim_x = dim_x + 4
         else:
-            forces_motor = None
-        if forces_dist:
-            forces_dist = np.zeros(3)
+            rotor_vel = None
+        if dist_f:
+            dist_f = np.zeros(3)
             dim_x = dim_x + 3
         else:
-            forces_dist = None
-        if torques_dist:
-            torques_dist = np.zeros(3)
+            dist_f = None
+        if dist_t:
+            dist_t = np.zeros(3)
             dim_x = dim_x + 3
         else:
-            torques_dist = None
+            dist_t = None
 
         covariance = np.eye(dim_x)
 
@@ -76,9 +76,9 @@ class UKFData:
             quat,
             vel,
             ang_vel,
-            forces_motor,
-            forces_dist,
-            torques_dist,
+            rotor_vel,
+            dist_f,
+            dist_t,
             covariance,
             sigmas_f,
             sigmas_h,
@@ -94,17 +94,17 @@ class UKFData:
         quat: Array,
         vel: Array,
         ang_vel: Array,
-        forces_motor: Array | None = None,
-        forces_dist: Array | None = None,
-        torques_dist: Array | None = None,
+        rotor_vel: Array | None = None,
+        dist_f: Array | None = None,
+        dist_t: Array | None = None,
     ) -> UKFData:
         """TODO."""
         dim_x = 13
-        if forces_motor is None:
+        if rotor_vel is None:
             dim_x = dim_x + 4
-        if forces_dist is None:
+        if dist_f is None:
             dim_x = dim_x + 3
-        if torques_dist is None:
+        if dist_t is None:
             dim_x = dim_x + 3
 
         covariance = np.eye(dim_x)
@@ -121,9 +121,9 @@ class UKFData:
             quat,
             vel,
             ang_vel,
-            forces_motor,
-            forces_dist,
-            torques_dist,
+            rotor_vel,
+            dist_f,
+            dist_t,
             covariance,
             sigmas_f,
             sigmas_h,
@@ -137,12 +137,12 @@ class UKFData:
         """Returns the state as an array."""
         xp = data.pos.__array_namespace__()
         x = xp.concat((data.pos, data.quat, data.vel, data.ang_vel), axis=-1)
-        if data.forces_motor is not None:
-            x = xp.concat((x, data.forces_motor), axis=-1)
-        if data.forces_dist is not None:
-            x = xp.concat((x, data.forces_dist), axis=-1)
-        if data.torques_dist is not None:
-            x = xp.concat((x, data.torques_dist), axis=-1)
+        if data.rotor_vel is not None:
+            x = xp.concat((x, data.rotor_vel), axis=-1)
+        if data.dist_f is not None:
+            x = xp.concat((x, data.dist_f), axis=-1)
+        if data.dist_t is not None:
+            x = xp.concat((x, data.dist_t), axis=-1)
         return x
 
     @classmethod
@@ -153,41 +153,41 @@ class UKFData:
         vel = array[..., 7:10]
         ang_vel = array[..., 10:13]
         idx = 13
-        if data.forces_motor is not None:
-            forces_motor = array[..., idx : idx + 4]
+        if data.rotor_vel is not None:
+            rotor_vel = array[..., idx : idx + 4]
             idx = idx + 4
         else:
-            forces_motor = None
-        if data.forces_dist is not None:
-            forces_dist = array[..., idx : idx + 3]
+            rotor_vel = None
+        if data.dist_f is not None:
+            dist_f = array[..., idx : idx + 3]
             idx = idx + 3
         else:
-            forces_dist = None
-        if data.torques_dist is not None:
-            torques_dist = array[..., idx : idx + 3]
+            dist_f = None
+        if data.dist_t is not None:
+            dist_t = array[..., idx : idx + 3]
             idx = idx + 3
         else:
-            torques_dist = None
+            dist_t = None
 
         return data.replace(
             pos=pos,
             quat=quat,
             vel=vel,
             ang_vel=ang_vel,
-            forces_motor=forces_motor,
-            forces_dist=forces_dist,
-            torques_dist=torques_dist,
+            rotor_vel=rotor_vel,
+            dist_f=dist_f,
+            dist_t=dist_t,
         )
 
     @classmethod
     def get_state_dim(cls, data: UKFData) -> int:
         """Returns the dimension of the state."""
         dim_x = 13
-        if data.forces_motor is not None:
+        if data.rotor_vel is not None:
             dim_x = dim_x + 4
-        if data.forces_dist is not None:
+        if data.dist_f is not None:
             dim_x = dim_x + 3
-        if data.torques_dist is not None:
+        if data.dist_t is not None:
             dim_x = dim_x + 3
         return dim_x
 

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 def get_dynamics(
     model_type: str, drone_model: str
 ) -> Callable[
-    [Array, Array, Array, Array, Array, Array, Array | None, Array | None],
+    [Array, Array, Array, Array, Array, Array | None, Array | None, Array | None],
     tuple[Array, Array, Array, Array, Array | None],
 ]:
     """Simplifies drone-model dynamics by adding all arguments for the given drone_model."""
@@ -40,7 +40,7 @@ def get_dynamics(
                 drag_linear_coef=params.drag_linear_coef,
                 drag_square_coef=params.drag_square_coef,
             )
-        case "_":
+        case _:
             raise NotImplementedError(f"Model type {model_type} not supported.")
 
 
@@ -49,7 +49,7 @@ def observation_function(
     quat: Array,
     vel: Array,
     ang_vel: Array,
-    command: Array,
+    cmd: Array,
     rotor_vel: Array | None = None,
     dist_f: Array | None = None,
     dist_t: Array | None = None,

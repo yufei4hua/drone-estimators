@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 def integrate_UKFData(state: UKFData, state_dot: UKFData) -> UKFData:
     """Integrates UKFData properly."""
-    next_pos, next_quat, next_vel, next_ang_vel, next_forces_motor = _integrate(
+    next_pos, next_quat, next_vel, next_ang_vel, next_rotor_vel = _integrate(
         state.pos,
         state.quat,
         state.vel,
@@ -24,17 +24,13 @@ def integrate_UKFData(state: UKFData, state_dot: UKFData) -> UKFData:
         state_dot.vel,
         state_dot.ang_vel,
         state.dt,
-        state.forces_motor,
-        state_dot.forces_motor,
+        state.rotor_vel,
+        state_dot.rotor_vel,
     )
     # TODO unit norm of quaternion!
     # TODO implement different integrator types later
     return state.replace(
-        pos=next_pos,
-        quat=next_quat,
-        vel=next_vel,
-        ang_vel=next_ang_vel,
-        forces_motor=next_forces_motor,
+        pos=next_pos, quat=next_quat, vel=next_vel, ang_vel=next_ang_vel, rotor_vel=next_rotor_vel
     )
 
 
@@ -48,8 +44,8 @@ def _integrate(
     vel_dot: Array,
     ang_vel_dot: Array,
     dt: float,
-    forces_motor: Array | None = None,
-    forces_motor_dot: Array | None = None,
+    rotor_vel: Array | None = None,
+    rotor_vel_dot: Array | None = None,
 ) -> Array:  # TODO is actually tuple
     """Integrate the dynamics forward in time.
 
@@ -63,8 +59,8 @@ def _integrate(
         vel_dot: The derivative of the velocity of the drone.
         ang_vel_dot: The derivative of the angular velocity of the drone.
         dt: The time step to integrate over.
-        forces_motor: The forces for the motors.
-        forces_motor_dot: The derivative of the motor forces.
+        rotor_vel: The forces for the motors.
+        rotor_vel_dot: The derivative of the motor forces.
 
     Returns:
         The next position, quaternion, velocity, and roll, pitch, and yaw rates of the drone.
@@ -73,8 +69,8 @@ def _integrate(
     next_quat = (R.from_quat(quat) * R.from_rotvec(ang_vel * dt)).as_quat()
     next_vel = vel + vel_dot * dt
     next_ang_vel = ang_vel + ang_vel_dot * dt
-    next_forces_motor = None
-    if forces_motor is not None:
-        next_forces_motor = forces_motor + forces_motor_dot * dt
+    next_rotor_vel = None
+    if rotor_vel is not None:
+        next_rotor_vel = rotor_vel + rotor_vel_dot * dt
 
-    return next_pos, next_quat, next_vel, next_ang_vel, next_forces_motor
+    return next_pos, next_quat, next_vel, next_ang_vel, next_rotor_vel

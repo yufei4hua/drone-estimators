@@ -29,6 +29,10 @@ from drone_estimators.structs import UKFData, UKFSettings
 if TYPE_CHECKING:
     from array_api_typing import Array
 
+# rotor_vel: Array | None = None,
+#     dist_f: Array | None = None,
+#     dist_t
+
 
 # @jax.jit
 def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
@@ -41,17 +45,17 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
     data_sigmas = UKFData.from_state_array(data, sigmas)
 
     # Pass sigma points through dynamics
-    pos_dot, quat_dot, vel_dot, ang_vel_dot, forces_motor_dot = settings.fx(
+    pos_dot, quat_dot, vel_dot, ang_vel_dot, rotor_vel_dot = settings.fx(
         pos=data_sigmas.pos,
         quat=data_sigmas.quat,
         vel=data_sigmas.vel,
         ang_vel=data_sigmas.ang_vel,
-        forces_motor=data_sigmas.forces_motor,
-        forces_dist=data_sigmas.forces_dist,
-        torques_dist=data_sigmas.torques_dist,
-        command=data.u,
+        cmd=data.u,
+        rotor_vel=data_sigmas.rotor_vel,
+        dist_f=data_sigmas.dist_f,
+        dist_t=data_sigmas.dist_t,
     )
-    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, ang_vel_dot, forces_motor_dot)
+    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, ang_vel_dot, rotor_vel_dot)
 
     # Integrate dynamics if continuous
     data_sigmas_f = integrate_UKFData(data_sigmas, data_sigmas_dot)
@@ -64,10 +68,10 @@ def ukf_predict_correct(data: UKFData, settings: UKFSettings) -> UKFData:
         quat=data_sigmas_f.quat,
         vel=data_sigmas_f.vel,
         ang_vel=data_sigmas_f.ang_vel,
-        command=data.u,
-        forces_motor=data_sigmas_f.forces_motor,
-        forces_dist=data_sigmas_f.forces_dist,
-        torques_dist=data_sigmas_f.torques_dist,
+        cmd=data.u,
+        rotor_vel=data_sigmas_f.rotor_vel,
+        dist_f=data_sigmas_f.dist_f,
+        dist_t=data_sigmas_f.dist_t,
     )
     data = data.replace(sigmas_h=sigmas_h)
 
@@ -126,18 +130,18 @@ def ukf_predict(data: UKFData, settings: UKFSettings) -> UKFData:
     data_sigmas = UKFData.from_state_array(data, sigmas)
 
     # Pass sigma points through dynamics
-    pos_dot, quat_dot, vel_dot, ang_vel_dot, forces_motor_dot = settings.fx(
+    pos_dot, quat_dot, vel_dot, ang_vel_dot, rotor_vel_dot = settings.fx(
         pos=data_sigmas.pos,
         quat=data_sigmas.quat,
         vel=data_sigmas.vel,
         ang_vel=data_sigmas.ang_vel,
-        forces_motor=data_sigmas.forces_motor,
-        forces_dist=data_sigmas.forces_dist,
-        torques_dist=data_sigmas.torques_dist,
-        command=data.u,
+        cmd=data.u,
+        rotor_vel=data_sigmas.rotor_vel,
+        dist_f=data_sigmas.dist_f,
+        dist_t=data_sigmas.dist_t,
     )
     # print(f"{pos_dot=}")
-    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, ang_vel_dot, forces_motor_dot)
+    data_sigmas_dot = UKFData.create(pos_dot, quat_dot, vel_dot, ang_vel_dot, rotor_vel_dot)
 
     # Integrate dynamics if continuous
     data_sigmas_f = integrate_UKFData(data_sigmas, data_sigmas_dot)
@@ -150,10 +154,10 @@ def ukf_predict(data: UKFData, settings: UKFSettings) -> UKFData:
         quat=data_sigmas_f.quat,
         vel=data_sigmas_f.vel,
         ang_vel=data_sigmas_f.ang_vel,
-        command=data.u,
-        forces_motor=data_sigmas_f.forces_motor,
-        forces_dist=data_sigmas_f.forces_dist,
-        torques_dist=data_sigmas_f.torques_dist,
+        cmd=data.u,
+        rotor_vel=data_sigmas_f.rotor_vel,
+        dist_f=data_sigmas_f.dist_f,
+        dist_t=data_sigmas_f.dist_t,
     )
     data = data.replace(sigmas_h=sigmas_h)
 

@@ -1,27 +1,29 @@
-# Simly add your estimators as shown below
+# Simply add your estimators as shown below
 
-# Supported types: legacy, ukf
+# Supported types: legacy, ukf, TODO implement EKF
 # Supported models: See drone_models
 
-[global] # TODO rename to global
-frequency = 300   # frequency of the estimator. This should be >= Vicon frequency
-timings = true    # print the timings of each estimator
-save_data = false # store the raw data and estimates into pickle files
+[global] # global settings, can be overwritten by each estimator
+frequency = 300      # frequency of the estimator. This should be >= Vicon frequency
+timings = true       # print the timings of each estimator
+save_data = false    # store the raw data and estimates into pickle files
+integrator = "euler" # TODO add RK4
+jit_compile = false  # TODO add jit compilation for faster estimators
 
 [estimator1]
-estimator_type = "legacy"
+estimator_type = "ukf"
 drone_name = "cf52"
 drone_config = "cf2x_L250"
-dynamics_model = "fitted_DI_D_rpyt"
-estimate_forces_motor = true
-estimate_forces_dist = true
-estimate_torques_dist = false
+dynamics_model = "so_rpy_rotor_drag_dynamics"
+estimate_rotor_vel = true
+estimate_dist_f = true
+estimate_dist_t = false
 
 # [estimator2]
 # estimator_type = "ukf"
 # drone_name = "cf99"
 # drone_config = "cf2x_L250"
 # dynamics_model = "fitted_DI_DD_rpyt"
-# estimate_forces_motor = true
-# estimate_forces_dist = true
-# estimate_torques_dist = true
+# estimate_rotor_vel = true
+# estimate_dist_f = true
+# estimate_dist_t = false
