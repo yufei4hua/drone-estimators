@@ -11,9 +11,9 @@ integrator = "euler" # TODO add RK4
 jit_compile = false  # TODO add jit compilation for faster estimators
 
 [estimator1]
-estimator_type = "ukf"
+estimator_type = "legacy"
 drone_name = "cf52"
-drone_config = "cf2x_L250"
+drone_config = "cf2x_B500"
 dynamics_model = "so_rpy_rotor_drag_dynamics"
 estimate_rotor_vel = true
 estimate_dist_f = true

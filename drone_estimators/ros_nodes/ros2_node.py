@@ -232,8 +232,8 @@ class MPEstimator:
                     # All the models run with rad and N, so we need to convert the RPYT command
                     cmd[..., -1] = pwm2force(
                         cmd[..., -1],
-                        self.estimator.constants.THRUST_MAX * 4,
-                        self.estimator.constants.PWM_MAX,
+                        0.18 * 4,  # TODO remove hard coded value
+                        65535,  # TODO remove hard coded value
                     )
                     cmd[..., :-1] = np.deg2rad(cmd[..., :-1])
                     self.estimator.set_input(cmd)  # TODO # compare times?
