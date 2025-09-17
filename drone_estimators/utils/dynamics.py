@@ -10,6 +10,7 @@ from drone_models.so_rpy_rotor_drag.params import SoRpyRotorDragParams
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
     from array_api_typing import Array
 
 
