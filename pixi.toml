@@ -18,7 +18,7 @@ rosbags = ">=0.10.9,<0.11"
 # gcc = ">=15.1.0,<15.2"
 # cxx-compiler = ">=1.0.0,<2"
 # gfortran = ">=15.1.0,<15.2"
-# openblas = ">=0.3.30,<0.4"
+openblas = ">=0.3.29,<0.4" # TODO remove once scipy is installed from pip
 ruff = "*"
 
 # Conda dependencies

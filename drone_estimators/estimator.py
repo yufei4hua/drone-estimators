@@ -6,8 +6,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 import numpy as np
-from lsy_models.models import dynamics_numeric, observation_function
-from lsy_models.utils.constants import Constants
 
 from drone_estimators.filterpy import (
     Q_discrete_white_noise,
@@ -16,6 +14,7 @@ from drone_estimators.filterpy import (
     ukf_predict_correct,
 )
 from drone_estimators.structs import SigmaPointsSettings, UKFData, UKFSettings
+from drone_estimators.utils.dynamics import get_dynamics, observation_function
 
 if TYPE_CHECKING:
     from array_api_typing import Array
@@ -66,7 +65,7 @@ class KalmanFilter(Estimator):
     def __init__(
         self,
         dt: float,
-        model: str = "mellinger_rpyt",  # mellinger_rpyt, fitted_DI_rpy
+        model: str = "so_rpy_rotor_drag_dynamics",  # mellinger_rpyt, fitted_DI_rpy
         config: str = "cf2x_L250",
         filter_type: str = "UKF",
         estimate_forces_motor: bool = False,
@@ -86,11 +85,10 @@ class KalmanFilter(Estimator):
             estimate_torques_dist: If the disturbance torques should be estimated, defaults to False.
             initial_obs: Optional, the initial observation of the environment's state. See the environment's observation space for details.
         """
-        fx = dynamics_numeric(model, config)
+        fx = get_dynamics(model, config)
         hx = observation_function
         # fx = jax.jit(dynamics_numeric(model, config))
         # hx = jax.jit(observation_function)
-        self.constants = Constants.from_config(config)
 
         dim_x = 13
         if estimate_forces_motor:

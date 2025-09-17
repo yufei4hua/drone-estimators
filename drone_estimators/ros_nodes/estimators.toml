@@ -9,7 +9,7 @@ timings = true    # print the timings of each estimator
 save_data = false # store the raw data and estimates into pickle files
 
 [estimator1]
-estimator_type = "ukf"
+estimator_type = "legacy"
 drone_name = "cf52"
 drone_config = "cf2x_L250"
 dynamics_model = "fitted_DI_D_rpyt"
