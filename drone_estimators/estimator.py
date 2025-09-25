@@ -14,7 +14,7 @@ from drone_estimators.filterpy import (
     ukf_predict_correct,
 )
 from drone_estimators.structs import SigmaPointsSettings, UKFData, UKFSettings
-from drone_estimators.utils.dynamics import get_dynamics, observation_function
+from drone_estimators.utils.dynamics import dynamics_function, observation_function
 
 if TYPE_CHECKING:
     from array_api_typing import Array
@@ -85,8 +85,9 @@ class KalmanFilter(Estimator):
             estimate_dist_t: If the disturbance torques should be estimated, defaults to False.
             initial_obs: Optional, the initial observation of the environment's state. See the environment's observation space for details.
         """
-        fx = get_dynamics(model, config)
-        hx = observation_function
+        
+        fx = dynamics_function(model, config)
+        hx = observation_function()
         # fx = jax.jit(dynamics_numeric(model, config))
         # hx = jax.jit(observation_function)
 
