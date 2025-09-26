@@ -15,14 +15,9 @@ if TYPE_CHECKING:
 
 def dynamics_function(model: str, config: str) -> Callable:
     """Imports and return the correct dynamics function from the drone-models."""
-    # Dynamically import the module
     module = importlib.import_module(f"drone_models.{model}.model")
-
-    # Get the `dynamics` function from the module
     fn = getattr(module, "dynamics")
-
-    # Parametrize it with the config
-    return parametrize(fn, config)
+    return parametrize(fn, config)  # parametrize to remove model parameters from function
 
 
 def observation_function(
