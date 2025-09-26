@@ -7,14 +7,14 @@ channels = ["https://fast.prefix.dev/conda-forge"]
 platforms = ["linux-64", "win-64", "osx-64", "osx-arm64", "linux-aarch64"]
 
 [dependencies]
-python = ">=3.11.12,<3.14"
-compilers = "*"
-cmake = "*"
-pkg-config = "*"
-make = "*"
-ninja = "*"
+python = ">=3.11.0,<3.14"
 pip = ">=25.0.1,<26"
-rosbags = ">=0.10.9,<0.11"
+# compilers = "*"
+# cmake = "*"
+# pkg-config = "*"
+# make = "*"
+# ninja = "*"
+# rosbags = ">=0.10.9,<0.11"
 # gcc = ">=15.1.0,<15.2"
 # cxx-compiler = ">=1.0.0,<2"
 # gfortran = ">=15.1.0,<15.2"
@@ -28,18 +28,36 @@ ruff = "*"
 
 # [pypi-dependencies]
 # jax = "*"
+# drone-estimators = { path = "./", editable = true }
 
 [target.linux.dependencies]
 libgl-devel = "*"
 
 [environments]
 jazzy = { features = ["jazzy"] }
+tests = { features = ["tests"], solve-group = "default" } 
 
 # jazzy
 [feature.jazzy]
 channels = ["https://prefix.dev/robostack-jazzy"]
 
 [feature.jazzy.dependencies]
+compilers = "*"
+cmake = "*"
+pkg-config = "*"
+make = "*"
+ninja = "*"
+rosbags = ">=0.10.9,<0.11"
+
 ros-jazzy-desktop = "*"
 colcon-common-extensions = "*"
 rosdep = "*"
+
+# tests
+[feature.tests.pypi-dependencies]
+pytest = ">=8.4.1"
+pytest-timeout = ">=2.1.0"
+drone-estimators = { path = "./", editable = true }
+
+[feature.tests.tasks]
+tests = { cmd = "pytest -v tests", description = "Run tests" }
