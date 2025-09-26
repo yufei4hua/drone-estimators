@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from functools import partial
+import importlib
 from typing import TYPE_CHECKING
 
 from drone_models.core import parametrize
@@ -13,13 +13,16 @@ if TYPE_CHECKING:
     from array_api_typing import Array
 
 
-def dynamics_function(model:str, config:str):
-    """TODO."""
-    # Idea: 
-    # from drone_models.{model}.model import dynamics as fn
-    
-    # return parametrize(fn, config)
-    ...
+def dynamics_function(model: str, config: str) -> Callable:
+    """Imports and return the correct dynamics function from the drone-models."""
+    # Dynamically import the module
+    module = importlib.import_module(f"drone_models.{model}.model")
+
+    # Get the `dynamics` function from the module
+    fn = getattr(module, "dynamics")
+
+    # Parametrize it with the config
+    return parametrize(fn, config)
 
 
 def observation_function(

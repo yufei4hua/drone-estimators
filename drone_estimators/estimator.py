@@ -85,9 +85,8 @@ class KalmanFilter(Estimator):
             estimate_dist_t: If the disturbance torques should be estimated, defaults to False.
             initial_obs: Optional, the initial observation of the environment's state. See the environment's observation space for details.
         """
-        
         fx = dynamics_function(model, config)
-        hx = observation_function()
+        hx = observation_function
         # fx = jax.jit(dynamics_numeric(model, config))
         # hx = jax.jit(observation_function)
 
