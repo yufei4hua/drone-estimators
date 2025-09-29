@@ -34,6 +34,7 @@ import rclpy
 import toml
 
 # Message types: https://docs.ros2.org/foxy/api/geometry_msgs/index-msg.html
+from drone_models.core import load_params
 from drone_models.transform import pwm2force
 from geometry_msgs.msg import PoseStamped, TwistStamped, WrenchStamped
 from munch import Munch, munchify
@@ -168,6 +169,7 @@ class MPEstimator:
                     )
             case "ukf":
                 self.input_needed = True
+                self.params = load_params(self.settings.dynamics_model, self.settings.drone_config)
                 self.estimator = KalmanFilter(
                     dt=1 / self.frequency,
                     model=self.settings.dynamics_model,
@@ -202,7 +204,7 @@ class MPEstimator:
 
     def run(self):
         """Main estimator loop."""
-        self._init_estimator()  # done here such that error can be raised properly
+        self._init_estimator()  # done here such that errors can be raised properly
 
         k = 0
         global_time = time.perf_counter()
@@ -231,9 +233,7 @@ class MPEstimator:
                     # roll (deg), pitch (deg), yaw (deg), thrust (PWM)
                     # All the models run with rad and N, so we need to convert the RPYT command
                     cmd[..., -1] = pwm2force(
-                        cmd[..., -1],
-                        0.18 * 4,  # TODO remove hard coded value
-                        65535,  # TODO remove hard coded value
+                        cmd[..., -1], self.params["thrust_max"] * 4, self.params["pwm_max"]
                     )
                     cmd[..., :-1] = np.deg2rad(cmd[..., :-1])
                     self.estimator.set_input(cmd)  # TODO # compare times?
