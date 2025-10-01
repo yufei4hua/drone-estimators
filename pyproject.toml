@@ -34,7 +34,7 @@ find = {}
 
 [tool.setuptools.package-data]
 drone_estimators = [
-    "**/*.toml",
+    "ros_nodes/*.toml",
 ]
 
 [tool.pytest.ini_options]
